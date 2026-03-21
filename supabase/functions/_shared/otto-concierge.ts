@@ -94,6 +94,7 @@ const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") ?? "";
 const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") ?? "";
 const TWILIO_PHONE_NUMBER = Deno.env.get("TWILIO_PHONE_NUMBER") ?? "";
 const OTTO_WEBHOOK_SECRET = Deno.env.get("OTTO_WEBHOOK_SECRET") ?? "";
+const OTTO_CALLBACK_DELAY_MS = Number(Deno.env.get("OTTO_CALLBACK_DELAY_MS") ?? "20000");
 
 export function cleanText(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -468,6 +469,10 @@ async function createCallbackCall(task: ConciergeTaskRow, step: ConciergeStepRow
       script,
     },
   }).eq("id", step.id);
+
+  if (OTTO_CALLBACK_DELAY_MS > 0) {
+    await new Promise((resolve) => setTimeout(resolve, OTTO_CALLBACK_DELAY_MS));
+  }
 
   const call = await createTwilioCall(params);
   await client.from("otto_task_steps").update({ status: "running" }).eq("id", step.id);
