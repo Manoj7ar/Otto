@@ -147,7 +147,7 @@ export async function authenticateUser(req: Request) {
     throw new HttpError(500, "Supabase environment is not configured.");
   }
 
-  const authHeader = req.headers.get("Authorization");
+  const authHeader = req.headers.get("x-otto-auth") ?? req.headers.get("Authorization");
 
   if (!authHeader) {
     throw new HttpError(401, "Authentication required.");

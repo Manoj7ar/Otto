@@ -6,9 +6,10 @@ type AuthMode = "sign_in" | "sign_up";
 
 interface AuthScreenProps {
   onSubmit: (mode: AuthMode, email: string, password: string) => Promise<void>;
+  onResetAuth: () => Promise<void>;
 }
 
-export default function AuthScreen({ onSubmit }: AuthScreenProps) {
+export default function AuthScreen({ onSubmit, onResetAuth }: AuthScreenProps) {
   const [mode, setMode] = useState<AuthMode>("sign_in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -24,6 +25,17 @@ export default function AuthScreen({ onSubmit }: AuthScreenProps) {
         <p className="mt-3 max-w-sm text-sm leading-6 text-secondary-otto">
           World&apos;s first autonomous agent that takes action anytime, anywhere.
         </p>
+        <button
+          type="button"
+          onClick={() => {
+            void onResetAuth().catch((error) => {
+              toast.error(error instanceof Error ? error.message : "Could not clear the saved session.");
+            });
+          }}
+          className="mt-4 text-sm text-secondary-otto underline underline-offset-4"
+        >
+          Reset saved session
+        </button>
 
         <div className="glass mt-8 grid grid-cols-2 gap-2 rounded-[1.5rem] p-1">
           <button

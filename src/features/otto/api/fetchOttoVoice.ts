@@ -10,8 +10,9 @@ export async function fetchOttoVoice(text: string, mode: "app" | "call" | "callb
   const response = await fetch(`${supabaseUrl}/functions/v1/otto-voice`, {
     method: "POST",
     headers: {
+      apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
       "Content-Type": "application/json",
-      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      ...(session?.access_token ? { "x-otto-auth": `Bearer ${session.access_token}` } : {}),
     },
     body: JSON.stringify({ text, mode }),
   });

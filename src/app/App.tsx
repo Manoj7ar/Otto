@@ -14,7 +14,7 @@ import OttoPage from "@/features/otto/screens/OttoPage";
 import { fetchInboxTasks } from "@/features/tasks/api/fetchInboxTasks";
 import TaskHistoryPanel from "@/features/tasks/components/TaskHistoryPanel";
 import type { InboxTask } from "@/features/tasks/types";
-import { supabase } from "@/shared/supabase/client";
+import { clearSupabaseBrowserSession, supabase } from "@/shared/supabase/client";
 
 type AppTab = "otto" | "tasks" | "account";
 
@@ -36,6 +36,15 @@ export default function App() {
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
+
+  const resetInvalidSession = useCallback(async (message = "Your Otto session expired. Sign in again.") => {
+    await clearSupabaseBrowserSession();
+    setSession(null);
+    setProfile(null);
+    setTasks([]);
+    setActiveTab("otto");
+    toast.error(message);
+  }, []);
 
   const loadProfile = useCallback(async (userId: string) => {
     setLoadingProfile(true);
@@ -81,6 +90,22 @@ export default function App() {
         toast.error("Could not restore the current session.");
       }
 
+      if (data.session) {
+        const { error: userError } = await supabase.auth.getUser();
+
+        if (userError) {
+          console.error("session_validation_error", userError);
+
+          if (/invalid jwt/i.test(userError.message)) {
+            if (mounted) {
+              await resetInvalidSession("The saved Otto session was invalid and has been cleared. Sign in again.");
+            }
+
+            return;
+          }
+        }
+      }
+
       setSession(data.session);
 
       if (data.session?.user.id) {
@@ -88,6 +113,13 @@ export default function App() {
           await Promise.all([loadProfile(data.session.user.id), loadTasks(data.session.user.id)]);
         } catch (loadError) {
           console.error("app_bootstrap_error", loadError);
+          const message = loadError instanceof Error ? loadError.message : "Could not load the Otto cloud profile.";
+
+          if (/invalid jwt/i.test(message)) {
+            await resetInvalidSession("The saved Otto session was invalid and has been cleared. Sign in again.");
+            return;
+          }
+
           toast.error("Could not load the Otto cloud profile.");
         }
       }
@@ -107,10 +139,18 @@ export default function App() {
 
       void loadProfile(nextSession.user.id).catch((error) => {
         console.error("profile_load_error", error);
+        if (error instanceof Error && /invalid jwt/i.test(error.message)) {
+          void resetInvalidSession("The Otto session became invalid and has been cleared. Sign in again.");
+          return;
+        }
+
         toast.error("Could not load the Otto cloud profile.");
       });
       void loadTasks(nextSession.user.id).catch((error) => {
         console.error("task_load_error", error);
+        if (error instanceof Error && /invalid jwt/i.test(error.message)) {
+          void resetInvalidSession("The Otto session became invalid and has been cleared. Sign in again.");
+        }
       });
     });
 
@@ -118,7 +158,7 @@ export default function App() {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [loadProfile, loadTasks]);
+  }, [loadProfile, loadTasks, resetInvalidSession]);
 
   const handleAuthSubmit = useCallback(async (mode: "sign_in" | "sign_up", email: string, password: string) => {
     const trimmedPassword = password.trim();
@@ -216,13 +256,18 @@ export default function App() {
   );
 
   const handleSignOut = useCallback(async () => {
-    const { error } = await supabase.auth.signOut();
-
-    if (error) {
-      throw error;
-    }
+    await clearSupabaseBrowserSession();
 
     toast.success("Signed out.");
+  }, []);
+
+  const handleResetAuth = useCallback(async () => {
+    await clearSupabaseBrowserSession();
+    setSession(null);
+    setProfile(null);
+    setTasks([]);
+    setActiveTab("otto");
+    toast.success("Cleared the local Otto session.");
   }, []);
 
   const handleRefreshTasks = useCallback(async () => {
@@ -291,7 +336,7 @@ export default function App() {
         }}
       />
 
-      {!user && <AuthScreen onSubmit={handleAuthSubmit} />}
+      {!user && <AuthScreen onSubmit={handleAuthSubmit} onResetAuth={handleResetAuth} />}
 
       {user && !onboardingComplete && (
         <OnboardingScreen profile={profile} busy={savingProfile} onSubmit={handleSaveProfile} />

@@ -4,7 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-otto-auth, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 const MAX_SESSION_TURNS = 8;
@@ -1009,7 +1009,7 @@ async function getAuthenticatedProfile(req: Request): Promise<ProfileRow> {
     throw new HttpError(500, "Supabase environment is not configured.");
   }
 
-  const authHeader = req.headers.get("Authorization");
+  const authHeader = req.headers.get("x-otto-auth") ?? req.headers.get("Authorization");
 
   if (!authHeader) {
     throw new HttpError(401, "Authentication required.");
