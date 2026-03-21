@@ -6,7 +6,7 @@
 
 @layer base {
   :root {
-    --background: 42 38% 95%;
+    --background: 34 20% 78%;
     --foreground: 24 20% 8%;
 
     --card: 38 34% 98%;
@@ -58,9 +58,9 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background:
-      radial-gradient(circle at top left, hsl(var(--otto-glow) / 0.34), transparent 24rem),
-      radial-gradient(circle at top right, hsl(var(--otto-glow-secondary) / 0.3), transparent 28rem),
-      linear-gradient(180deg, hsl(42 46% 97%), hsl(38 34% 94%) 44%, hsl(36 28% 92%));
+      radial-gradient(circle at top left, hsl(var(--otto-glow) / 0.2), transparent 24rem),
+      radial-gradient(circle at top right, hsl(var(--otto-glow-secondary) / 0.17), transparent 28rem),
+      linear-gradient(180deg, hsl(36 21% 82%), hsl(32 18% 76%) 44%, hsl(28 16% 70%));
     min-height: 100vh;
   }
 

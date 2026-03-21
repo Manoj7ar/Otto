@@ -302,7 +302,7 @@ export default function App() {
           <header className="sticky top-0 z-40 bg-transparent">
             <div className="mx-auto flex max-w-5xl justify-center px-4 py-4">
               <div className="glass grid w-full max-w-sm grid-cols-3 rounded-full p-1">
-                {(["otto", "tasks", "account"] as AppTab[]).map((tab) => (
+                {(["tasks", "otto", "account"] as AppTab[]).map((tab) => (
                   <button
                     key={tab}
                     type="button"

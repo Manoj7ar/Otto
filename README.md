@@ -1,5 +1,7 @@
 # Otto AI Navigator
 
+![Otter](public/otter.png)
+
 Otto is a mobile-first AI assistant for live visual help, Firecrawl-backed web verification, and cloud-run phone workflows. A user can point the camera at something, type or speak a question, get a researched answer, approve a phone call if verification is needed, and then leave the app while Otto finishes the business call and calls the user back with a spoken summary.
 
 This codebase is structured around one core principle: Firecrawl is the retrieval system and ElevenLabs is the voice system. Gemini handles interpretation and synthesis, but Firecrawl supplies the evidence and ElevenLabs supplies the spoken audio across both the app and the phone workflow.

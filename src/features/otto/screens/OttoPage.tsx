@@ -21,6 +21,32 @@ interface OttoPageProps {
   onTaskCreated: () => Promise<void> | void;
 }
 
+function WavingOtterGreeting() {
+  return (
+    <motion.div
+      className="pointer-events-none fixed inset-0 z-10 flex flex-col items-center justify-center px-6 text-center"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+    >
+      <img
+        src="/otter.png"
+        alt="Otter"
+        className="h-auto w-[min(22rem,68vw)] object-contain"
+        draggable={false}
+      />
+
+      <div className="mt-5 max-w-sm">
+        <p className="text-xs uppercase tracking-[0.28em] text-secondary-otto">Otto Is Ready</p>
+        <p className="mt-3 text-sm leading-6 text-foreground/80">
+          Ask a question, open the camera, or start speaking to begin.
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPageProps) {
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [cameraStatus, setCameraStatus] = useState<"idle" | "requesting" | "ready" | "denied" | "unavailable">("idle");
@@ -319,7 +345,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
   const canCapturePhoto = cameraEnabled && cameraStatus === "ready" && !capturedImageBase64;
 
   return (
-    <div className="relative flex min-h-[calc(100dvh-5rem)] flex-col items-center justify-center overflow-hidden bg-background">
+    <div>
       <CameraView
         ref={cameraRef}
         active={cameraEnabled}
@@ -420,7 +446,9 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
       </AnimatePresence>
 
       <AnimatePresence mode="wait">
-        {showGreeting && <motion.div key="greeting" className="relative z-10" />}
+        {showGreeting && (
+          <WavingOtterGreeting key="greeting" />
+        )}
       </AnimatePresence>
 
       <AnimatePresence>
