@@ -4,15 +4,17 @@ import { AnimatePresence, motion } from "framer-motion";
 interface CameraViewProps {
   active: boolean;
   flashTrigger: number;
+  onStatusChange?: (status: CameraStatus) => void;
 }
 
 export interface CameraViewHandle {
   captureFrame: () => string | null;
+  isReady: () => boolean;
 }
 
 type CameraStatus = "idle" | "requesting" | "ready" | "denied" | "unavailable";
 
-const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flashTrigger }, ref) => {
+const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flashTrigger, onStatusChange }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -23,7 +25,7 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
       const video = videoRef.current;
       const canvas = canvasRef.current;
 
-      if (!video || !canvas || !video.videoWidth) {
+      if (!video || !canvas || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth) {
         return null;
       }
 
@@ -40,13 +42,24 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
       const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
       return dataUrl.split(",")[1];
     },
-  }));
+    isReady: () => cameraStatus === "ready",
+  }), [cameraStatus]);
 
   useEffect(() => {
+    onStatusChange?.(cameraStatus);
+  }, [cameraStatus, onStatusChange]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     const stopStream = () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
+      }
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
       }
     };
 
@@ -66,14 +79,36 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: "environment" }, audio: false })
       .then((stream) => {
-        streamRef.current = stream;
-        setCameraStatus("ready");
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
         }
+
+        streamRef.current = stream;
+
+        const video = videoRef.current;
+
+        if (!video) {
+          setCameraStatus("unavailable");
+          return;
+        }
+
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          void video.play().catch(() => {
+            // Mobile Safari may reject play() without user-visible failure; metadata readiness is enough for capture.
+          });
+
+          if (!cancelled) {
+            setCameraStatus("ready");
+          }
+        };
       })
       .catch((error: DOMException) => {
+        if (cancelled) {
+          return;
+        }
+
         console.error("Camera access error:", error);
         setCameraStatus(
           error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError"
@@ -82,7 +117,10 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
         );
       });
 
-    return stopStream;
+    return () => {
+      cancelled = true;
+      stopStream();
+    };
   }, [active]);
 
   const statusMessage =
@@ -131,7 +169,10 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
             />
 
             {statusMessage && (
-              <div className="pointer-events-none absolute inset-x-0 top-6 flex justify-center px-4">
+              <div
+                className="pointer-events-none absolute inset-x-0 flex justify-center px-4"
+                style={{ top: "max(1rem, env(safe-area-inset-top))" }}
+              >
                 <div className="glass rounded-full px-4 py-2 text-xs text-secondary-otto">
                   {statusMessage}
                 </div>

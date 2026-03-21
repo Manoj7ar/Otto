@@ -13,16 +13,12 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GOOGLE_API_KEY");
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
 const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
-const SMTP_HOST = Deno.env.get("SMTP_HOST") ?? "";
-const SMTP_USER = Deno.env.get("SMTP_USER") ?? "";
-const SMTP_PASSWORD = Deno.env.get("SMTP_PASSWORD") ?? "";
-const SMTP_FROM_EMAIL = Deno.env.get("SMTP_FROM_EMAIL") ?? "";
 
 type ConfidenceLevel = "low" | "medium" | "high";
 type SearchMode = "none" | "search";
 type ActionType = "source" | "search" | "directions";
 type IntentKind = "answer" | "call_verification" | "call_booking";
-type FollowUpAction = "callback_user" | "send_user_email";
+type FollowUpAction = "callback_user";
 
 interface AnalyzeRequest {
   query?: string;
@@ -226,7 +222,7 @@ const synthesisSchema = {
         },
         followUpActions: {
           type: "ARRAY",
-          items: { type: "STRING", enum: ["callback_user", "send_user_email"] },
+          items: { type: "STRING", enum: ["callback_user"] },
         },
       },
       required: [
@@ -298,10 +294,6 @@ function generateId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-function canSendFollowUpEmail() {
-  return Boolean(SMTP_HOST && SMTP_USER && SMTP_PASSWORD && SMTP_FROM_EMAIL);
-}
-
 function normalizeCallProposal(raw: unknown, sources: SearchSource[], profile: ProfileRow): OttoCallProposal | null {
   const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : null;
 
@@ -319,14 +311,11 @@ function normalizeCallProposal(raw: unknown, sources: SearchSource[], profile: P
   const callTargetName = cleanText(data.callTargetName);
   const callTargetPhone = normalizePhone(cleanText(data.callTargetPhone));
   const requestedFollowUps = cleanStringArray(data.followUpActions, 3)
-    .filter((entry): entry is FollowUpAction => entry === "callback_user" || entry === "send_user_email");
-  const filteredFollowUps = canSendFollowUpEmail()
-    ? requestedFollowUps
-    : requestedFollowUps.filter((entry) => entry !== "send_user_email");
+    .filter((entry): entry is FollowUpAction => entry === "callback_user");
   const followUpActions = Array.from(
     new Set<FollowUpAction>([
-      profile.callback_phone ? "callback_user" : filteredFollowUps[0] ?? "callback_user",
-      ...filteredFollowUps,
+      profile.callback_phone ? "callback_user" : requestedFollowUps[0] ?? "callback_user",
+      ...requestedFollowUps,
     ]),
   );
 
@@ -510,7 +499,7 @@ function buildProfileContext(profile: ProfileRow) {
     timezone: profile.timezone,
     travelMode: profile.travel_mode,
     callbackPhone: profile.callback_phone,
-    callBriefingEnabled: profile.call_briefing_enabled,
+    callBriefingEnabled: true,
   };
 }
 
@@ -693,6 +682,15 @@ function ensureCallPrompt(answer: string, proposal: OttoCallProposal | null) {
     : `${answer} Do you want me to make this call?`;
 }
 
+function isSimpleGreeting(query: string, usedVision: boolean) {
+  if (usedVision) {
+    return false;
+  }
+
+  const normalized = query.trim().toLowerCase();
+  return /^(hi|hello|hey|yo|hiya|good morning|good afternoon|good evening)$/.test(normalized);
+}
+
 function normalizeSynthesis(
   raw: unknown,
   interpretation: Interpretation,
@@ -816,6 +814,56 @@ function buildUpdatedSessionContext(
     activeSubjectType: reply.subjectType || sessionContext.activeSubjectType,
     summary: sessionSummary,
     turns: [...sessionContext.turns, userTurn, assistantTurn].slice(-MAX_SESSION_TURNS),
+  };
+}
+
+function buildGreetingResponse(
+  query: string,
+  sessionContext: OttoSessionContext,
+  profile: ProfileRow,
+): OttoTurnResponse {
+  const createdAt = new Date().toISOString();
+  const greetingText = `Hello ${profile.full_name || "there"}. I'm ready. You can ask about what you're looking at, or I can use Firecrawl research and make a cloud call if needed.`;
+  const reply: OttoReply = {
+    messageId: generateId("msg"),
+    createdAt,
+    subject: "Otto",
+    subjectType: "assistant",
+    answer: `Hello ${profile.full_name || "there"}. I’m ready. You can ask about what you’re looking at, or I can use Firecrawl research and make a cloud call if needed.`,
+    confidence: "high",
+    usedVision: false,
+    usedWebSearch: false,
+    suggestedFollowUps: [
+      "What am I looking at?",
+      "Can you verify this by calling?",
+      "Find more information about this",
+    ],
+    actions: [],
+    sources: [],
+    structuredDetails: [
+      {
+        label: "Ready",
+        value: "Otto is online and waiting for your next question.",
+      },
+      {
+        label: "Cloud workflow",
+        value: "If a live call would help, Otto can run it in the cloud and call you back with the result.",
+      },
+    ],
+    callProposal: null,
+  };
+  reply.answer = greetingText;
+
+  return {
+    reply,
+    sessionContext: buildUpdatedSessionContext(
+      sessionContext,
+      query,
+      false,
+      reply,
+      "The user greeted Otto and Otto is ready for the next task.",
+    ),
+    sessionStatus: "active",
   };
 }
 
@@ -1022,6 +1070,13 @@ serve(async (req) => {
       return jsonResponse({ error: "Query or image is required" }, 400);
     }
 
+    if (isSimpleGreeting(trimmedQuery, usedVision)) {
+      return jsonResponse({
+        success: true,
+        data: buildGreetingResponse(trimmedQuery, sessionContext, profile),
+      });
+    }
+
     const identifyStartedAt = performance.now();
     const interpretation = normalizeInterpretation(
       await callGemini<Interpretation>(
@@ -1091,7 +1146,7 @@ serve(async (req) => {
           "Answer the current turn using the current frame, session memory, user profile defaults, and Firecrawl evidence.",
           "If a call would help more than research alone, return a callProposal with the target, phone number, exact reason, and question list.",
           "Only return callProposal when the phone number is plausible from Firecrawl-backed evidence.",
-          "Default followUpActions to callback_user. Add send_user_email only when it materially helps and email follow-up is configured.",
+          "followUpActions must only contain callback_user.",
           "There is no browser automation.",
           "Do not invent hours, prices, ratings, names, URLs, or phone numbers.",
           "Session summary should be a short memory string that helps the next follow-up resolve correctly.",

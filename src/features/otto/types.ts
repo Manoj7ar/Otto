@@ -11,7 +11,7 @@ export interface OttoAction {
   type: "source" | "search" | "directions";
 }
 
-export type OttoFollowUpAction = "callback_user" | "send_user_email";
+export type OttoFollowUpAction = "callback_user";
 
 export interface OttoCallProposal {
   callType: "verification" | "booking";

@@ -15,25 +15,22 @@ export default function AuthScreen({ onSubmit }: AuthScreenProps) {
   const [busy, setBusy] = useState(false);
 
   return (
-    <div
-      className="flex min-h-[100dvh] items-center justify-center px-4 py-10"
-      style={{ background: "#000000" }}
-    >
-      <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-white/6 p-7 backdrop-blur-2xl sm:p-8">
-        <p className="text-sm text-white/60">Hello, Welcome to Otto</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
+    <div className="flex min-h-[100dvh] items-center justify-center px-4 py-10">
+      <div className="glass-strong w-full max-w-md rounded-[2rem] p-7 sm:p-8">
+        <p className="text-sm text-secondary-otto">Hello, Welcome to Otto</p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">
           {mode === "sign_in" ? "Sign In" : "Sign Up"}
         </h1>
-        <p className="mt-3 max-w-sm text-sm leading-6 text-white/50">
+        <p className="mt-3 max-w-sm text-sm leading-6 text-secondary-otto">
           World&apos;s first autonomous agent that takes action anytime, anywhere.
         </p>
 
-        <div className="mt-8 grid grid-cols-2 gap-2 rounded-[1.5rem] border border-white/10 bg-white/5 p-1">
+        <div className="glass mt-8 grid grid-cols-2 gap-2 rounded-[1.5rem] p-1">
           <button
             type="button"
             onClick={() => setMode("sign_in")}
             className={`rounded-[1.1rem] px-4 py-3 text-sm font-medium transition-colors ${
-              mode === "sign_in" ? "bg-white/12 text-white" : "text-white/45"
+              mode === "sign_in" ? "bg-white/18 text-foreground" : "text-secondary-otto"
             }`}
           >
             Sign In
@@ -42,7 +39,7 @@ export default function AuthScreen({ onSubmit }: AuthScreenProps) {
             type="button"
             onClick={() => setMode("sign_up")}
             className={`rounded-[1.1rem] px-4 py-3 text-sm font-medium transition-colors ${
-              mode === "sign_up" ? "bg-white/12 text-white" : "text-white/45"
+              mode === "sign_up" ? "bg-white/18 text-foreground" : "text-secondary-otto"
             }`}
           >
             Sign Up
@@ -76,33 +73,33 @@ export default function AuthScreen({ onSubmit }: AuthScreenProps) {
             }
           }}
         >
-          <label className="block rounded-[1.5rem] border border-white/10 bg-white/5 px-4 py-3">
-            <span className="text-xs uppercase tracking-[0.2em] text-white/45">Email</span>
+          <label className="glass block rounded-[1.5rem] px-4 py-3">
+            <span className="text-xs uppercase tracking-[0.2em] text-secondary-otto">Email</span>
             <input
               type="email"
               required
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="Email"
-              className="mt-3 w-full bg-transparent text-base text-white outline-none placeholder:text-white/25"
+              className="mt-3 w-full bg-transparent text-base text-foreground outline-none placeholder:text-secondary-otto/60"
             />
           </label>
 
-          <label className="block rounded-[1.5rem] border border-white/10 bg-white/5 px-4 py-3">
-            <span className="text-xs uppercase tracking-[0.2em] text-white/45">Password</span>
+          <label className="glass block rounded-[1.5rem] px-4 py-3">
+            <span className="text-xs uppercase tracking-[0.2em] text-secondary-otto">Password</span>
             <input
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Password"
-              className="mt-3 w-full bg-transparent text-base text-white outline-none placeholder:text-white/25"
+              className="mt-3 w-full bg-transparent text-base text-foreground outline-none placeholder:text-secondary-otto/60"
             />
           </label>
 
           <button
             type="submit"
             disabled={busy}
-            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-[1.5rem] border border-white/12 bg-white/10 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-white/14 disabled:opacity-50"
+            className="glass-button-primary mt-2 inline-flex w-full items-center justify-center gap-2 rounded-[1.5rem] px-4 py-3 text-sm font-medium transition-colors disabled:opacity-50"
           >
             {busy ? <LoaderCircle size={16} className="animate-spin" /> : null}
             {mode === "sign_in" ? "Sign In" : "Sign Up"}

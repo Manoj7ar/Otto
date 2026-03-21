@@ -1,4 +1,4 @@
-import { Clock3, ExternalLink, Mail, Phone, RefreshCcw, ShieldCheck } from "lucide-react";
+import { Clock3, ExternalLink, Phone, RefreshCcw, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { resolveTaskApproval } from "../api/resolveTaskApproval";
 import type { InboxTask } from "../types";
@@ -69,11 +69,7 @@ function readSourceSnapshot(task: InboxTask) {
 }
 
 function stepIcon(stepType: InboxTask["steps"][number]["step_type"]) {
-  if (stepType === "call_business" || stepType === "callback_user") {
-    return <Phone size={14} />;
-  }
-
-  return <Mail size={14} />;
+  return <Phone size={14} />;
 }
 
 export default function TaskHistoryPanel({ tasks, busy = false, onRefresh }: TaskHistoryPanelProps) {
@@ -96,19 +92,19 @@ export default function TaskHistoryPanel({ tasks, busy = false, onRefresh }: Tas
   ].filter((section) => section.items.length > 0);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pb-32 pt-8">
-      <div className="flex items-center justify-between gap-4">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pb-[calc(8rem+env(safe-area-inset-bottom))] pt-6 sm:pt-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm uppercase tracking-[0.24em] text-secondary-otto">Cloud calls</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">Active call jobs and callbacks</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-secondary-otto">
-            Otto stores Firecrawl evidence, business call progress, callback briefings, and any optional follow-up emails here.
+            Otto stores Firecrawl evidence, business call progress, and callback briefings here.
           </p>
         </div>
         <button
           type="button"
           onClick={() => void onRefresh()}
-          className="glass-button inline-flex items-center gap-2 rounded-full px-4 py-3 text-sm"
+          className="glass-button inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm sm:w-auto"
         >
           <RefreshCcw size={16} className={busy ? "animate-spin" : ""} />
           Refresh
@@ -162,7 +158,7 @@ export default function TaskHistoryPanel({ tasks, busy = false, onRefresh }: Tas
                       <p className="text-xs uppercase tracking-[0.2em] text-secondary-otto">What Otto asked</p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {callQuestions.map((question) => (
-                          <span key={question} className="rounded-full border border-white/8 bg-black/10 px-3 py-2 text-xs text-secondary-otto">
+                          <span key={question} className="rounded-full border border-border bg-white/30 px-3 py-2 text-xs text-secondary-otto">
                             {question}
                           </span>
                         ))}
@@ -242,25 +238,6 @@ export default function TaskHistoryPanel({ tasks, busy = false, onRefresh }: Tas
                       </div>
                     ))}
                   </div>
-
-                  {task.emails.length > 0 && (
-                    <div className="mt-5 space-y-3">
-                      {task.emails.map((email) => (
-                        <div key={email.id} className="glass rounded-3xl p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-medium text-foreground">{email.subject}</p>
-                              <p className="mt-1 text-sm text-secondary-otto">{email.recipient_email}</p>
-                            </div>
-                            <div className="text-[11px] uppercase tracking-[0.18em] text-secondary-otto">
-                              {email.status}
-                            </div>
-                          </div>
-                          <p className="mt-3 text-sm leading-6 text-foreground/80">{email.body}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
 
                   <div className="mt-5 flex flex-wrap gap-3 text-sm text-secondary-otto">
                     <span className="inline-flex items-center gap-2">

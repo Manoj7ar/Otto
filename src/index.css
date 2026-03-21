@@ -6,44 +6,44 @@
 
 @layer base {
   :root {
-    --background: 220 35% 6%;
-    --foreground: 210 40% 98%;
+    --background: 42 38% 95%;
+    --foreground: 24 20% 8%;
 
-    --card: 220 28% 12%;
-    --card-foreground: 210 40% 98%;
+    --card: 38 34% 98%;
+    --card-foreground: 24 20% 8%;
 
-    --popover: 220 28% 12%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 38 34% 98%;
+    --popover-foreground: 24 20% 8%;
 
-    --primary: 197 100% 50%;
-    --primary-foreground: 0 0% 0%;
+    --primary: 28 42% 24%;
+    --primary-foreground: 24 20% 8%;
 
-    --secondary: 260 60% 50%;
-    --secondary-foreground: 0 0% 100%;
+    --secondary: 34 30% 88%;
+    --secondary-foreground: 24 20% 8%;
 
-    --muted: 219 23% 18%;
-    --muted-foreground: 214 18% 72%;
+    --muted: 36 26% 90%;
+    --muted-foreground: 28 14% 34%;
 
-    --accent: 197 100% 50%;
-    --accent-foreground: 0 0% 0%;
+    --accent: 34 30% 88%;
+    --accent-foreground: 24 20% 8%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 100% / 0.12;
-    --input: 0 0% 100% / 0.12;
-    --ring: 197 100% 50%;
+    --border: 28 18% 38% / 0.12;
+    --input: 28 18% 38% / 0.14;
+    --ring: 28 42% 24%;
 
     --radius: 1rem;
 
     /* Otto-specific tokens */
-    --otto-glow: 197 100% 50%;
-    --otto-glow-secondary: 260 60% 55%;
-    --otto-glass: 210 50% 98% / 0.08;
-    --otto-glass-border: 210 50% 98% / 0.16;
-    --otto-glass-strong: 210 50% 98% / 0.14;
-    --otto-text-secondary: 214 24% 76%;
-    --otto-shadow: 222 60% 3%;
+    --otto-glow: 36 70% 78%;
+    --otto-glow-secondary: 28 55% 86%;
+    --otto-glass: 0 0% 100% / 0.24;
+    --otto-glass-border: 28 22% 34% / 0.12;
+    --otto-glass-strong: 0 0% 100% / 0.34;
+    --otto-text-secondary: 28 14% 34%;
+    --otto-shadow: 28 28% 42%;
   }
 }
 
@@ -58,9 +58,9 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background:
-      radial-gradient(circle at top left, hsl(var(--otto-glow) / 0.18), transparent 24rem),
-      radial-gradient(circle at top right, hsl(var(--otto-glow-secondary) / 0.18), transparent 26rem),
-      linear-gradient(180deg, hsl(220 38% 9%), hsl(222 38% 6%) 42%, hsl(224 38% 5%));
+      radial-gradient(circle at top left, hsl(var(--otto-glow) / 0.34), transparent 24rem),
+      radial-gradient(circle at top right, hsl(var(--otto-glow-secondary) / 0.3), transparent 28rem),
+      linear-gradient(180deg, hsl(42 46% 97%), hsl(38 34% 94%) 44%, hsl(36 28% 92%));
     min-height: 100vh;
   }
 
@@ -73,25 +73,25 @@
   .glass {
     @apply border backdrop-blur-2xl;
     background:
-      linear-gradient(180deg, hsl(0 0% 100% / 0.12), hsl(0 0% 100% / 0.04)),
+      linear-gradient(180deg, hsl(0 0% 100% / 0.42), hsl(0 0% 100% / 0.14)),
       hsl(var(--otto-glass));
     border-color: hsl(var(--otto-glass-border));
     box-shadow:
-      0 18px 50px hsl(var(--otto-shadow) / 0.42),
-      inset 0 1px 0 hsl(0 0% 100% / 0.14),
-      inset 0 -1px 0 hsl(0 0% 100% / 0.04);
+      0 18px 50px hsl(var(--otto-shadow) / 0.08),
+      inset 0 1px 0 hsl(0 0% 100% / 0.5),
+      inset 0 -1px 0 hsl(28 18% 44% / 0.03);
   }
 
   .glass-strong {
     @apply border backdrop-blur-3xl;
     background:
-      linear-gradient(180deg, hsl(0 0% 100% / 0.16), hsl(0 0% 100% / 0.05)),
+      linear-gradient(180deg, hsl(0 0% 100% / 0.52), hsl(0 0% 100% / 0.2)),
       hsl(var(--otto-glass-strong));
     border-color: hsl(var(--otto-glass-border));
     box-shadow:
-      0 24px 80px hsl(var(--otto-shadow) / 0.55),
-      inset 0 1px 0 hsl(0 0% 100% / 0.18),
-      inset 0 -1px 0 hsl(0 0% 100% / 0.04);
+      0 24px 80px hsl(var(--otto-shadow) / 0.1),
+      inset 0 1px 0 hsl(0 0% 100% / 0.58),
+      inset 0 -1px 0 hsl(28 18% 44% / 0.03);
   }
 
   .glass-panel {
@@ -103,7 +103,7 @@
     position: absolute;
     inset: 1px;
     border-radius: inherit;
-    background: linear-gradient(135deg, hsl(0 0% 100% / 0.14), transparent 42%, hsl(197 100% 50% / 0.05));
+    background: linear-gradient(135deg, hsl(0 0% 100% / 0.18), transparent 42%, hsl(var(--otto-glow) / 0.05));
     opacity: 0.9;
     pointer-events: none;
   }
@@ -111,8 +111,8 @@
   .glass-button {
     @apply glass relative overflow-hidden text-foreground transition-all duration-300 ease-out;
     box-shadow:
-      0 14px 30px hsl(var(--otto-shadow) / 0.38),
-      inset 0 1px 0 hsl(0 0% 100% / 0.18);
+      0 14px 30px hsl(var(--otto-shadow) / 0.07),
+      inset 0 1px 0 hsl(0 0% 100% / 0.52);
   }
 
   .glass-button::before {
@@ -120,21 +120,21 @@
     position: absolute;
     inset: 1px;
     border-radius: inherit;
-    background: linear-gradient(135deg, hsl(0 0% 100% / 0.18), transparent 45%, hsl(var(--otto-glow) / 0.08));
+    background: linear-gradient(135deg, hsl(0 0% 100% / 0.22), transparent 45%, hsl(var(--otto-glow) / 0.05));
     pointer-events: none;
     opacity: 0.95;
   }
 
   .glass-button:hover {
     transform: translateY(-1px);
-    border-color: hsl(0 0% 100% / 0.22);
+    border-color: hsl(28 20% 30% / 0.18);
     background:
-      linear-gradient(180deg, hsl(0 0% 100% / 0.16), hsl(0 0% 100% / 0.06)),
+      linear-gradient(180deg, hsl(0 0% 100% / 0.54), hsl(0 0% 100% / 0.2)),
       hsl(var(--otto-glass-strong));
     box-shadow:
-      0 18px 38px hsl(var(--otto-shadow) / 0.45),
-      0 0 24px hsl(var(--otto-glow) / 0.14),
-      inset 0 1px 0 hsl(0 0% 100% / 0.22);
+      0 18px 38px hsl(var(--otto-shadow) / 0.1),
+      0 0 24px hsl(var(--otto-glow) / 0.08),
+      inset 0 1px 0 hsl(0 0% 100% / 0.6);
   }
 
   .glass-button:active {
@@ -144,20 +144,20 @@
   .glass-button-primary {
     color: hsl(var(--primary-foreground));
     background:
-      linear-gradient(135deg, hsl(var(--otto-glow) / 0.68), hsl(var(--otto-glow-secondary) / 0.52)),
-      linear-gradient(180deg, hsl(0 0% 100% / 0.18), hsl(0 0% 100% / 0.04));
-    border-color: hsl(0 0% 100% / 0.2);
+      linear-gradient(135deg, hsl(var(--otto-glow) / 0.22), hsl(var(--otto-glow-secondary) / 0.16)),
+      linear-gradient(180deg, hsl(0 0% 100% / 0.46), hsl(0 0% 100% / 0.16));
+    border-color: hsl(28 20% 30% / 0.14);
     box-shadow:
-      0 18px 44px hsl(var(--otto-glow) / 0.28),
-      0 12px 30px hsl(var(--otto-shadow) / 0.34),
-      inset 0 1px 0 hsl(0 0% 100% / 0.22);
+      0 18px 44px hsl(var(--otto-glow) / 0.08),
+      0 12px 30px hsl(var(--otto-shadow) / 0.08),
+      inset 0 1px 0 hsl(0 0% 100% / 0.58);
   }
 
   .glass-button-primary:hover {
     box-shadow:
-      0 22px 54px hsl(var(--otto-glow) / 0.34),
-      0 18px 36px hsl(var(--otto-shadow) / 0.38),
-      inset 0 1px 0 hsl(0 0% 100% / 0.24);
+      0 22px 54px hsl(var(--otto-glow) / 0.12),
+      0 18px 36px hsl(var(--otto-shadow) / 0.11),
+      inset 0 1px 0 hsl(0 0% 100% / 0.64);
   }
 
   .glass-pill {

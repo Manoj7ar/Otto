@@ -258,7 +258,7 @@ export default function App() {
       <>
         <Toaster
           position="top-center"
-          theme="dark"
+          theme="light"
           toastOptions={{
             classNames: {
               toast: "border-border bg-card text-card-foreground shadow-lg",
@@ -280,7 +280,7 @@ export default function App() {
     <>
       <Toaster
         position="top-center"
-        theme="dark"
+        theme="light"
         toastOptions={{
           classNames: {
             toast: "border-border bg-card text-card-foreground shadow-lg",
@@ -298,24 +298,17 @@ export default function App() {
       )}
 
       {user && onboardingComplete && profile && (
-        <div className="min-h-[100dvh] pb-24">
-          <header className="sticky top-0 z-40 border-b border-white/10 bg-background/80 backdrop-blur-2xl">
-            <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4">
-              <div>
-                <p className="text-sm uppercase tracking-[0.24em] text-secondary-otto">Otto cloud agent</p>
-                <p className="mt-1 text-sm text-foreground/85">
-                  {profile.current_region} | {profile.travel_mode}
-                </p>
-              </div>
-
-              <div className="glass rounded-full p-1">
+        <div className="min-h-[100dvh] pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
+          <header className="sticky top-0 z-40 bg-transparent">
+            <div className="mx-auto flex max-w-5xl justify-center px-4 py-4">
+              <div className="glass grid w-full max-w-sm grid-cols-3 rounded-full p-1">
                 {(["otto", "tasks", "account"] as AppTab[]).map((tab) => (
                   <button
                     key={tab}
                     type="button"
                     onClick={() => setActiveTab(tab)}
-                    className={`rounded-full px-4 py-2 text-sm capitalize transition-colors ${
-                      activeTab === tab ? "bg-white/12 text-foreground" : "text-secondary-otto"
+                    className={`rounded-full px-4 py-2.5 text-sm capitalize transition-colors ${
+                      activeTab === tab ? "bg-white/20 text-foreground" : "text-secondary-otto"
                     }`}
                   >
                     {tab}

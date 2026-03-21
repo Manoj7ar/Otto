@@ -139,7 +139,7 @@ export default function ProfileForm({
       <button
         type="submit"
         disabled={busy}
-        className="glass-button-primary mt-8 inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium disabled:opacity-50"
+        className="glass-button-primary mt-8 inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-medium disabled:opacity-50 sm:w-auto"
       >
         {busy ? <LoaderCircle size={16} className="animate-spin" /> : <Save size={16} />}
         {submitLabel}

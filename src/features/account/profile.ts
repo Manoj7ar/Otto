@@ -23,7 +23,7 @@ export function createDefaultProfileValues(profile?: ProfileRow | null): Profile
     timezone: profile?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
     travelMode: profile?.travel_mode ?? "walking",
     callbackPhone: profile?.callback_phone ?? "",
-    callBriefingEnabled: true,
+    callBriefingEnabled: profile?.call_briefing_enabled ?? true,
   };
 }
 

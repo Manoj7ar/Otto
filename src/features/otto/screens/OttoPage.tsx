@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { History, MessageSquareText, RotateCcw } from "lucide-react";
+import { History, MessageSquareText, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import type { ProfileRow } from "@/features/account/profile";
 import { approveOttoTask } from "../api/approveOttoTask";
@@ -23,6 +23,8 @@ interface OttoPageProps {
 
 export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPageProps) {
   const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [cameraStatus, setCameraStatus] = useState<"idle" | "requesting" | "ready" | "denied" | "unavailable">("idle");
+  const [capturedImageBase64, setCapturedImageBase64] = useState<string | null>(null);
   const [flashCount, setFlashCount] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -36,15 +38,22 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
   const cameraRef = useRef<CameraViewHandle>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const liveAgentPaused = isProcessing || isSpeaking || approvalVisible || approvingTask || cameraEnabled;
 
   const {
     isListening,
+    isLiveMode,
     transcript,
     startListening,
     stopListening,
     resetTranscript,
     isSupported: isSpeechRecognitionSupported,
-  } = useSpeechRecognition();
+  } = useSpeechRecognition({
+    paused: liveAgentPaused,
+    onSilence: (text) => {
+      void handleSubmit(text);
+    },
+  });
 
   const canSpeak = useMemo(
     () => typeof window !== "undefined" && ("Audio" in window || "speechSynthesis" in window),
@@ -90,6 +99,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
       }
 
       stopSpeaking();
+      setIsSpeaking(true);
 
       try {
         const blob = await fetchOttoVoice(text);
@@ -112,6 +122,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
         await audio.play();
       } catch (error) {
         console.error("otto_voice_error", error);
+        setIsSpeaking(false);
         fallbackSpeak(text);
       }
     },
@@ -139,20 +150,41 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
   }, [latestReply]);
 
   const handleCameraToggle = useCallback(() => {
+    setCapturedImageBase64(null);
     setCameraEnabled((enabled) => !enabled);
   }, []);
 
+  const handleCapturePhoto = useCallback(() => {
+    const frame = cameraRef.current?.captureFrame();
+
+    if (!frame) {
+      toast.error("Could not capture a photo. Try again.");
+      return;
+    }
+
+    setCapturedImageBase64(frame);
+    setFlashCount((count) => count + 1);
+  }, []);
+
+  const handleRetakePhoto = useCallback(() => {
+    setCapturedImageBase64(null);
+  }, []);
+
   const handleSubmit = useCallback(
-    async (text: string) => {
-      if (isListening) {
-        stopListening();
+    async (text: string, imageOverride?: string) => {
+      const query = text.trim();
+
+      if (!query) {
+        return;
       }
 
       stopSpeaking();
 
       let imageBase64: string | undefined;
 
-      if (cameraEnabled) {
+      if (imageOverride) {
+        imageBase64 = imageOverride;
+      } else if (cameraEnabled) {
         const frame = cameraRef.current?.captureFrame();
 
         if (frame) {
@@ -162,13 +194,15 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
       }
 
       setIsProcessing(true);
-      setLatestQuery(text.trim());
+      setLatestQuery(query);
       resetTranscript();
 
       try {
-        const data = await submitOttoTurn(text, imageBase64, sessionContext);
+        const data = await submitOttoTurn(query, imageBase64, sessionContext);
         setLatestReply(data.reply);
         setSessionContext(data.sessionContext);
+        setCapturedImageBase64(null);
+        setCameraEnabled(false);
         setDrawerVisible(true);
       } catch (error: unknown) {
         console.error("Otto analyze error:", error);
@@ -177,7 +211,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
         setIsProcessing(false);
       }
     },
-    [cameraEnabled, isListening, resetTranscript, sessionContext, stopListening, stopSpeaking]
+    [cameraEnabled, resetTranscript, sessionContext, stopSpeaking]
   );
 
   const handleMicToggle = useCallback(
@@ -236,6 +270,8 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
     stopListening();
     stopSpeaking();
     resetTranscript();
+    setCapturedImageBase64(null);
+    setCameraEnabled(false);
     setLatestReply(null);
     setDrawerVisible(false);
     setApprovalVisible(false);
@@ -271,7 +307,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
   }, [latestQuery, latestReply, onOpenTasks, onTaskCreated, profile.callback_phone]);
 
   const showGreeting = !cameraEnabled && !hasSessionTurns && !isProcessing;
-  const showMiniOrb = cameraEnabled || hasSessionTurns || isProcessing;
+  const showMiniOrb = hasSessionTurns || isProcessing || isSpeaking || isListening;
   const orbMode = isProcessing
     ? "processing"
     : isSpeaking
@@ -279,10 +315,34 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
       : isListening
         ? "listening"
         : "idle";
+  const capturedPreviewUrl = capturedImageBase64 ? `data:image/jpeg;base64,${capturedImageBase64}` : null;
+  const canCapturePhoto = cameraEnabled && cameraStatus === "ready" && !capturedImageBase64;
 
   return (
     <div className="relative flex min-h-[calc(100dvh-5rem)] flex-col items-center justify-center overflow-hidden bg-background">
-      <CameraView ref={cameraRef} active={cameraEnabled} flashTrigger={flashCount} />
+      <CameraView
+        ref={cameraRef}
+        active={cameraEnabled}
+        flashTrigger={flashCount}
+        onStatusChange={setCameraStatus}
+      />
+
+      <AnimatePresence>
+        {cameraEnabled && !isProcessing && (
+          <motion.button
+            type="button"
+            onClick={handleCameraToggle}
+            className="glass fixed right-4 z-20 flex h-11 w-11 items-center justify-center rounded-full"
+            style={{ top: "max(1rem, env(safe-area-inset-top))" }}
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            aria-label="Close camera"
+          >
+            <X size={18} />
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showMiniOrb && (
@@ -299,7 +359,26 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
       </AnimatePresence>
 
       <AnimatePresence>
-        {hasSessionTurns && (
+        {cameraEnabled && capturedPreviewUrl && !isProcessing && (
+          <motion.div
+            className="pointer-events-none fixed left-1/2 top-1/2 z-20 w-[min(72vw,18rem)] -translate-x-1/2 -translate-y-1/2"
+            initial={{ opacity: 0, scale: 0.92, y: 24 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.92, y: 24 }}
+          >
+            <div className="glass-strong overflow-hidden rounded-[1.75rem] p-2 shadow-[0_18px_50px_hsl(28_28%_42%_/_0.14)]">
+              <img
+                src={capturedPreviewUrl}
+                alt="Captured preview"
+                className="aspect-[3/4] w-full rounded-[1.25rem] object-cover"
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {hasSessionTurns && !cameraEnabled && (
           <motion.div
             className="fixed left-4 top-[5.75rem] z-20 max-w-[calc(100vw-7rem)]"
             initial={{ opacity: 0, y: -12 }}
@@ -341,46 +420,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
       </AnimatePresence>
 
       <AnimatePresence mode="wait">
-        {showGreeting && (
-          <motion.div
-            key="greeting"
-            className="relative z-10 flex flex-col items-center gap-8 px-6"
-            initial={{ opacity: 0, y: 20, filter: "blur(8px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: -20, filter: "blur(8px)" }}
-            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <OttoOrb mode={orbMode} />
-
-            <div className="text-center">
-              <motion.p
-                className="text-sm font-light tracking-wide text-secondary-otto"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.2, duration: 0.5 }}
-              >
-                Hello {profile.full_name || "there"}
-              </motion.p>
-              <motion.h1
-                className="mt-2 text-2xl font-semibold tracking-tight"
-                style={{ lineHeight: "1.2" }}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.35, duration: 0.5 }}
-              >
-                Point, ask, research, and let Otto call when needed.
-              </motion.h1>
-              <motion.p
-                className="mt-4 max-w-sm text-sm leading-6 text-secondary-otto"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.45, duration: 0.5 }}
-              >
-                Firecrawl does the research. Gemini decides if a call would help. Otto can call, follow up, and call you back even after you leave the app.
-              </motion.p>
-            </div>
-          </motion.div>
-        )}
+        {showGreeting && <motion.div key="greeting" className="relative z-10" />}
       </AnimatePresence>
 
       <AnimatePresence>
@@ -427,16 +467,65 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
         onClose={() => setApprovalVisible(false)}
       />
 
-      <InputBar
-        onSubmit={handleSubmit}
-        onCameraClick={handleCameraToggle}
-        onMicToggle={handleMicToggle}
-        isCameraActive={cameraEnabled}
-        isListening={isListening}
-        isMicSupported={isSpeechRecognitionSupported}
-        isProcessing={isProcessing}
-        voiceTranscript={transcript}
-      />
+      {!cameraEnabled ? (
+        <InputBar
+          onSubmit={handleSubmit}
+          onCameraClick={handleCameraToggle}
+          onMicToggle={handleMicToggle}
+          isCameraActive={cameraEnabled}
+          isListening={isListening}
+          isLiveMode={isLiveMode}
+          isLivePaused={liveAgentPaused}
+          isMicSupported={isSpeechRecognitionSupported}
+          isProcessing={isProcessing}
+          voiceTranscript={transcript}
+        />
+      ) : (
+        <AnimatePresence>
+          {!isProcessing && (
+            <motion.div
+              className="fixed inset-x-0 bottom-0 z-30 px-4 pt-4"
+              style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+              initial={{ y: 80, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 80, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            >
+              <div className="mx-auto flex max-w-sm flex-col items-center gap-4">
+                {capturedImageBase64 ? (
+                  <div className="flex w-full items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleRetakePhoto}
+                      className="glass-button flex h-14 w-14 shrink-0 items-center justify-center rounded-full"
+                      aria-label="Retake photo"
+                    >
+                      <RotateCcw size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSubmit("Carry out the task for me.", capturedImageBase64)}
+                      className="glass-button-primary min-h-[3.5rem] flex-1 rounded-full px-6 py-4 text-sm font-medium"
+                    >
+                      Ask Otto to carry out the task for me
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCapturePhoto}
+                    disabled={!canCapturePhoto}
+                    className="glass-strong flex h-20 w-20 items-center justify-center rounded-full disabled:opacity-45"
+                    aria-label="Take photo"
+                  >
+                    <span className="h-16 w-16 rounded-full border border-black/10 bg-white/55" />
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
     </div>
   );
 }

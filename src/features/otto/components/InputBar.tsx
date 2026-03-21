@@ -5,9 +5,11 @@ import { Camera, Mic, MicOff, SendHorizontal } from "lucide-react";
 interface InputBarProps {
   onSubmit: (text: string) => void;
   onCameraClick: () => void;
-  onMicToggle: (listening: boolean) => void;
+  onMicToggle: (liveMode: boolean) => void;
   isCameraActive: boolean;
   isListening: boolean;
+  isLiveMode: boolean;
+  isLivePaused: boolean;
   isMicSupported: boolean;
   isProcessing: boolean;
   voiceTranscript: string;
@@ -19,6 +21,8 @@ export default function InputBar({
   onMicToggle,
   isCameraActive,
   isListening,
+  isLiveMode,
+  isLivePaused,
   isMicSupported,
   isProcessing,
   voiceTranscript,
@@ -26,11 +30,11 @@ export default function InputBar({
   const [inputText, setInputText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const displayText = isListening ? voiceTranscript : inputText;
+  const displayText = isLiveMode ? voiceTranscript : inputText;
   const hasContent = displayText.trim().length > 0;
 
   const handleSend = () => {
-    const text = isListening ? voiceTranscript : inputText;
+    const text = isLiveMode ? voiceTranscript : inputText;
 
     if (!text.trim()) {
       return;
@@ -41,6 +45,10 @@ export default function InputBar({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (isLiveMode) {
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       handleSend();
@@ -48,13 +56,8 @@ export default function InputBar({
   };
 
   const handleMicClick = () => {
-    if (isListening) {
+    if (isLiveMode) {
       onMicToggle(false);
-
-      if (voiceTranscript.trim()) {
-        setTimeout(() => onSubmit(voiceTranscript.trim()), 100);
-      }
-
       return;
     }
 
@@ -63,33 +66,47 @@ export default function InputBar({
 
   return (
     <motion.div
-      className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-8 pt-4"
+      className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-4 pt-3 sm:px-4 sm:pt-4"
       initial={{ y: 80, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ type: "spring", stiffness: 300, damping: 30, delay: 0.3 }}
-      style={{
-        background: "linear-gradient(to top, hsl(223 42% 6% / 0.9), transparent)",
-      }}
+      style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
     >
-      <div className="glass-strong mx-auto flex max-w-xl items-center gap-3 rounded-[2rem] px-4 py-4">
-        <div className="glass flex flex-1 items-center rounded-full px-4 py-3">
+      <div className="glass-strong mx-auto flex max-w-xl items-center gap-2 rounded-[1.75rem] px-3 py-3 sm:gap-3 sm:rounded-[2rem] sm:px-4 sm:py-4">
+        <div className="glass flex flex-1 items-center gap-2 rounded-full px-3 py-3 sm:gap-3 sm:px-4">
+          {isLiveMode && (
+            <span
+              className={`rounded-full px-3 py-1 text-[10px] font-medium uppercase tracking-[0.22em] ${
+                isListening ? "bg-emerald-500/10 text-emerald-950" : "bg-white/16 text-secondary-otto"
+              }`}
+            >
+              {isListening ? "Live" : "Paused"}
+            </span>
+          )}
           <input
             ref={inputRef}
             type="text"
             value={displayText}
             onChange={(event) => {
-              if (!isListening) {
+              if (!isLiveMode) {
                 setInputText(event.target.value);
               }
             }}
             onKeyDown={handleKeyDown}
-            placeholder={isListening ? "Listening..." : "Ask Otto about what you see..."}
-            disabled={isProcessing}
+            placeholder={
+              isLiveMode
+                ? isLivePaused
+                  ? "Live agent paused while Otto responds..."
+                  : "Listening for your next question..."
+                : "Ask Otto about what you see..."
+            }
+            disabled={isProcessing && !isLiveMode}
+            readOnly={isLiveMode}
             className="flex-1 bg-transparent text-sm font-light tracking-[0.02em] text-foreground placeholder:text-secondary-otto outline-none disabled:opacity-50"
           />
         </div>
 
-        {hasContent && !isListening && (
+        {hasContent && !isLiveMode && (
           <motion.button
             onClick={handleSend}
             className="glass-button-primary flex h-12 w-12 items-center justify-center rounded-full"
@@ -107,7 +124,7 @@ export default function InputBar({
           onClick={onCameraClick}
           disabled={isProcessing}
           className={`glass-pill flex h-12 w-12 items-center justify-center disabled:opacity-40 ${
-            isCameraActive ? "border-white/25 bg-cyan-300/15" : ""
+            isCameraActive ? "border-amber-900/10 bg-amber-100/18" : ""
           }`}
           whileTap={{ scale: 0.92 }}
           whileHover={{ scale: 1.04 }}
@@ -118,24 +135,23 @@ export default function InputBar({
 
         <motion.button
           onClick={handleMicClick}
-          disabled={isProcessing}
           className={`flex h-12 w-12 items-center justify-center rounded-full disabled:opacity-40 ${
             !isMicSupported
               ? "glass-button text-secondary-otto"
-              : isListening
-                ? "glass-button border-red-300/30 bg-red-500/35"
+              : isLiveMode
+                ? "glass-button border-red-300/16 bg-red-500/14"
                 : "glass-button-primary"
           }`}
-          title={isMicSupported ? "Voice input" : "Speech input is not supported on this browser"}
+          title={isMicSupported ? "Start or stop live voice agent" : "Speech input is not supported on this browser"}
           whileTap={{ scale: 0.92 }}
           whileHover={{ scale: 1.04 }}
           aria-label={
-            !isMicSupported ? "Voice input unsupported" : isListening ? "Stop listening" : "Voice input"
+            !isMicSupported ? "Voice input unsupported" : isLiveMode ? "Stop live agent" : "Start live agent"
           }
-          animate={isListening ? { scale: [1, 1.08, 1] } : {}}
-          transition={isListening ? { duration: 1.5, repeat: Infinity } : {}}
+          animate={isLiveMode ? { scale: [1, 1.08, 1] } : {}}
+          transition={isLiveMode ? { duration: 1.5, repeat: Infinity } : {}}
         >
-          {isListening ? (
+          {isLiveMode ? (
             <MicOff size={18} className="text-primary-foreground" />
           ) : (
             <Mic size={18} className={isMicSupported ? "text-primary-foreground" : "text-secondary-otto"} />

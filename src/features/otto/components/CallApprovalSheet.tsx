@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ExternalLink, Mail, Phone, ShieldCheck, X } from "lucide-react";
+import { ExternalLink, Phone, ShieldCheck, X } from "lucide-react";
 import type { OttoCallProposal } from "../types";
 
 interface CallApprovalSheetProps {
@@ -26,14 +26,18 @@ export default function CallApprovalSheet({
       {visible && (
         <>
           <motion.div
-            className="fixed inset-0 z-50 bg-black/55"
+            className="fixed inset-0 z-50 bg-stone-950/18"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
           />
           <motion.div
-            className="glass-strong fixed inset-x-0 bottom-0 z-[60] mx-auto max-w-xl rounded-t-[2rem] px-5 pb-8 pt-5"
+            className="glass-strong fixed inset-x-0 bottom-0 z-[60] mx-auto max-w-xl overflow-y-auto rounded-t-[1.75rem] px-4 pb-4 pt-4 sm:rounded-t-[2rem] sm:px-5 sm:pt-5"
+            style={{
+              maxHeight: "min(85vh, 900px)",
+              paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
+            }}
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
@@ -77,7 +81,7 @@ export default function CallApprovalSheet({
                 <p className="text-xs uppercase tracking-[0.2em] text-secondary-otto">What Otto will ask</p>
                 <div className="mt-3 space-y-2">
                   {proposal.callQuestions.map((question) => (
-                    <div key={question} className="rounded-2xl border border-white/8 bg-black/10 px-4 py-3 text-sm leading-6 text-foreground/85">
+                    <div key={question} className="rounded-2xl border border-border bg-white/30 px-4 py-3 text-sm leading-6 text-foreground/85">
                       {question}
                     </div>
                   ))}
@@ -94,7 +98,7 @@ export default function CallApprovalSheet({
                         href={source.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block rounded-2xl border border-white/8 bg-black/10 px-4 py-3 transition-transform duration-200 hover:-translate-y-0.5"
+                        className="block rounded-2xl border border-border bg-white/30 px-4 py-3 transition-transform duration-200 hover:-translate-y-0.5"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -113,11 +117,9 @@ export default function CallApprovalSheet({
               <div className="glass-panel rounded-3xl p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-secondary-otto">After the call</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {proposal.followUpActions.map((action) => (
-                    <span key={action} className="rounded-full border border-white/8 bg-black/10 px-3 py-2 text-xs text-secondary-otto">
-                      {action === "callback_user" ? "Call me back with the result" : "Send me an email update"}
-                    </span>
-                  ))}
+                  <span className="rounded-full border border-border bg-white/30 px-3 py-2 text-xs text-secondary-otto">
+                    Call me back with the result
+                  </span>
                 </div>
               </div>
             </div>
@@ -127,12 +129,12 @@ export default function CallApprovalSheet({
               Once you approve, the entire workflow runs in the cloud. You can close the app and Otto will continue the call, follow-up actions, and callback briefing.
             </div>
 
-            <div className="mt-6 flex flex-wrap gap-3">
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void onApprove()}
-                className="glass-button-primary inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium disabled:opacity-50"
+                className="glass-button-primary inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-medium disabled:opacity-50 sm:w-auto"
               >
                 <Phone size={16} />
                 {busy ? "Starting call..." : "Yes, make the call"}
@@ -140,9 +142,9 @@ export default function CallApprovalSheet({
               <button
                 type="button"
                 onClick={onClose}
-                className="glass-button inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium"
+                className="glass-button inline-flex w-full items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-medium sm:w-auto"
               >
-                <Mail size={16} />
+                <X size={16} />
                 Not now
               </button>
             </div>

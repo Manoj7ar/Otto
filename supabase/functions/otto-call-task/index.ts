@@ -56,9 +56,7 @@ serve(async (req) => {
       [
         proposal.callReason,
         ...proposal.callQuestions,
-        ...proposal.followUpActions.map((action) =>
-          action === "callback_user" ? "Call the user back with the result." : "Send the user an email update."
-        ),
+        "Call the user back with the result.",
       ],
       12,
     );
@@ -82,9 +80,11 @@ serve(async (req) => {
         metadata: {
           callQuestions: proposal.callQuestions,
           callReason: proposal.callReason,
-          followUpActions: proposal.followUpActions,
+          followUpActions: ["callback_user"],
           callbackPhone: profile.callback_phone,
+          callBriefingEnabled: true,
           callTargetEmail: proposal.callTargetEmail,
+          conversationLog: [],
         },
         inbox_state: "active",
         latest_summary: proposal.summary,
@@ -108,48 +108,24 @@ serve(async (req) => {
         approval_required: true,
         approval_summary: proposal.summary,
         recipient_name: proposal.callTargetName,
-        recipient_email: proposal.callTargetEmail,
         recipient_phone: proposal.callTargetPhone,
-        email_subject: null,
-        email_body: null,
         payload: {
           callReason: proposal.callReason,
           questions: proposal.callQuestions,
           firecrawlEvidence: proposal.firecrawlEvidence,
         },
       },
-      ...(proposal.followUpActions.includes("send_user_email")
-        ? [{
-          task_id: task.id,
-          user_id: user.id,
-          step_order: 1,
-          step_type: "send_user_email",
-          title: "Send you an email update",
-          status: "pending",
-          approval_required: false,
-          approval_summary: "Send an email summary after the call finishes.",
-          recipient_name: profile.full_name,
-          recipient_email: null,
-          recipient_phone: null,
-          email_subject: null,
-          email_body: null,
-          payload: {},
-        }]
-        : []),
       {
         task_id: task.id,
         user_id: user.id,
-        step_order: proposal.followUpActions.includes("send_user_email") ? 2 : 1,
+        step_order: 1,
         step_type: "callback_user",
         title: "Call you back with the result",
         status: "pending",
         approval_required: false,
         approval_summary: "Place a callback briefing after the task finishes.",
         recipient_name: profile.full_name,
-        recipient_email: null,
         recipient_phone: profile.callback_phone,
-        email_subject: null,
-        email_body: null,
         payload: {},
       },
     ];

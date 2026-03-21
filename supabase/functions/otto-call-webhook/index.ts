@@ -4,7 +4,9 @@ import {
   createServiceClient,
   executeTaskChain,
   fetchTaskBundle,
+  getConversationLog,
   HttpError,
+  persistConversationLog,
 } from "../_shared/otto-concierge.ts";
 
 const corsHeaders = {
@@ -194,6 +196,10 @@ serve(async (req) => {
         throw new HttpError(404, "No callback step is associated with this task.");
       }
 
+      if (callbackStep.status === "completed" || callbackStep.status === "failed") {
+        return new Response("ok", { headers: corsHeaders });
+      }
+
       const form = await req.formData();
       const callStatus = cleanText(form.get("CallStatus"));
 
@@ -242,6 +248,10 @@ serve(async (req) => {
       const form = await req.formData();
       const callStatus = cleanText(form.get("CallStatus"));
 
+      if (callStep.status === "completed" || callStep.status === "failed") {
+        return new Response("ok", { headers: corsHeaders });
+      }
+
       if (callStatus === "busy" || callStatus === "failed" || callStatus === "no-answer") {
         await client.from("otto_task_steps").update({
           status: "failed",
@@ -268,9 +278,7 @@ serve(async (req) => {
 
     const form = await req.formData();
     const latestSpeech = cleanText(form.get("SpeechResult"));
-    const conversationLog = Array.isArray(task.metadata?.conversationLog)
-      ? [...(task.metadata.conversationLog as unknown[])]
-      : [];
+    const conversationLog = getConversationLog(task);
     const callQuestions = Array.isArray(callStep.payload?.questions)
       ? (callStep.payload.questions as unknown[]).map((entry) => cleanText(entry)).filter(Boolean)
       : [];
@@ -295,11 +303,9 @@ serve(async (req) => {
         inbox_state: "active",
         latest_summary: "The business line did not provide a clear spoken response.",
         result_summary: "The business line did not provide a clear spoken response.",
-        metadata: {
-          ...task.metadata,
-          conversationLog,
-        },
       }).eq("id", taskId);
+
+      await persistConversationLog(client, task, conversationLog);
 
       await executeTaskChain(taskId);
       return xml(`<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl("No problem. I will stop here for now. Goodbye."))}</Play><Hangup/></Response>`);
@@ -318,12 +324,7 @@ serve(async (req) => {
         at: new Date().toISOString(),
       });
 
-      await client.from("otto_tasks").update({
-        metadata: {
-          ...task.metadata,
-          conversationLog,
-        },
-      }).eq("id", taskId);
+      await persistConversationLog(client, task, conversationLog);
 
       return buildGatherResponse(taskId, decision.nextQuestion, turn + 1);
     }
@@ -347,11 +348,9 @@ serve(async (req) => {
       inbox_state: "active",
       latest_summary: finalSummary,
       result_summary: finalSummary,
-      metadata: {
-        ...task.metadata,
-        conversationLog,
-      },
     }).eq("id", taskId);
+
+    await persistConversationLog(client, task, conversationLog);
 
     await executeTaskChain(taskId);
 

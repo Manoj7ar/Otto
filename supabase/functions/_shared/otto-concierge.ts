@@ -1,8 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
-import nodemailer from "npm:nodemailer@6.9.16";
 
-export type FollowUpAction = "callback_user" | "send_user_email";
-export type ProposedStepType = "call_business" | "send_business_email" | "send_user_email" | "callback_user";
+export type FollowUpAction = "callback_user";
+export type ProposedStepType = "call_business" | "callback_user";
 
 export interface FirecrawlEvidence {
   title: string;
@@ -42,7 +41,9 @@ export interface ConciergeTaskRow {
   latest_step_label: string | null;
   latest_summary: string | null;
   metadata: Record<string, unknown>;
+  conversation_log: unknown[];
   callback_call_sid: string | null;
+  twilio_call_sid: string | null;
   result_summary: string | null;
 }
 
@@ -57,10 +58,7 @@ export interface ConciergeStepRow {
   approval_required: boolean;
   approval_summary: string | null;
   recipient_name: string | null;
-  recipient_email: string | null;
   recipient_phone: string | null;
-  email_subject: string | null;
-  email_body: string | null;
   payload: Record<string, unknown>;
   result_summary: string | null;
 }
@@ -69,6 +67,12 @@ interface UserProfileRow {
   full_name: string | null;
   callback_phone: string | null;
   call_briefing_enabled: boolean;
+}
+
+interface ConversationEntry {
+  role: "agent" | "business";
+  text: string;
+  at: string;
 }
 
 export class HttpError extends Error {
@@ -90,12 +94,6 @@ const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") ?? "";
 const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") ?? "";
 const TWILIO_PHONE_NUMBER = Deno.env.get("TWILIO_PHONE_NUMBER") ?? "";
 const OTTO_WEBHOOK_SECRET = Deno.env.get("OTTO_WEBHOOK_SECRET") ?? "";
-const SMTP_HOST = Deno.env.get("SMTP_HOST") ?? "";
-const SMTP_PORT = Number(Deno.env.get("SMTP_PORT") ?? "587");
-const SMTP_USER = Deno.env.get("SMTP_USER") ?? "";
-const SMTP_PASSWORD = Deno.env.get("SMTP_PASSWORD") ?? "";
-const SMTP_FROM_NAME = Deno.env.get("SMTP_FROM_NAME") ?? "Otto";
-const SMTP_FROM_EMAIL = Deno.env.get("SMTP_FROM_EMAIL") ?? "";
 
 export function cleanText(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -128,10 +126,6 @@ export function createServiceClient() {
   }
 
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-}
-
-export function hasSmtpConfig() {
-  return Boolean(SMTP_HOST && SMTP_USER && SMTP_PASSWORD && SMTP_FROM_EMAIL);
 }
 
 export function assertCallRuntimeReady() {
@@ -209,9 +203,6 @@ export function normalizeCallProposal(raw: unknown): CallProposal | null {
       .filter((entry): entry is FirecrawlEvidence => Boolean(entry))
       .slice(0, 4)
     : [];
-  const followUpActions = cleanStringArray(data.followUpActions, 3)
-    .filter((action): action is FollowUpAction => action === "callback_user" || action === "send_user_email");
-  const uniqueFollowUps = Array.from(new Set<FollowUpAction>(["callback_user", ...followUpActions]));
 
   if (!callType || !callTargetPhone) {
     return null;
@@ -236,7 +227,7 @@ export function normalizeCallProposal(raw: unknown): CallProposal | null {
     callTargetEmail: cleanText(data.callTargetEmail) || null,
     firecrawlEvidence,
     callQuestions: cleanStringArray(data.callQuestions, 6),
-    followUpActions: uniqueFollowUps,
+    followUpActions: ["callback_user"],
   };
 }
 
@@ -280,12 +271,7 @@ export async function fetchTaskBundle(taskId: string) {
   };
 }
 
-export async function createApprovedRecord(
-  taskId: string,
-  stepId: string,
-  userId: string,
-  summary: string,
-) {
+export async function createApprovedRecord(taskId: string, stepId: string, userId: string, summary: string) {
   const client = createServiceClient();
   await client.from("otto_task_approvals").insert({
     task_id: taskId,
@@ -326,28 +312,8 @@ async function ensurePendingApproval(task: ConciergeTaskRow, step: ConciergeStep
   }).eq("id", task.id);
 }
 
-async function smtpTransport() {
-  if (!hasSmtpConfig()) {
-    throw new HttpError(500, "SMTP email environment is not configured.");
-  }
-
-  return nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: SMTP_PORT === 465,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASSWORD,
-    },
-  });
-}
-
 function getCallStep(steps: ConciergeStepRow[]) {
   return steps.find((step) => step.step_type === "call_business") ?? null;
-}
-
-function getUserEmailStep(steps: ConciergeStepRow[]) {
-  return steps.find((step) => step.step_type === "send_user_email") ?? null;
 }
 
 function getCallbackStep(steps: ConciergeStepRow[]) {
@@ -356,7 +322,6 @@ function getCallbackStep(steps: ConciergeStepRow[]) {
 
 function buildOutcomeSummary(task: ConciergeTaskRow, steps: ConciergeStepRow[]) {
   const callStep = getCallStep(steps);
-  const emailStep = getUserEmailStep(steps);
   const callbackStep = getCallbackStep(steps);
   const parts = [
     cleanText(
@@ -365,12 +330,6 @@ function buildOutcomeSummary(task: ConciergeTaskRow, steps: ConciergeStepRow[]) 
     ),
   ];
 
-  if (emailStep?.status === "completed") {
-    parts.push("Email update sent.");
-  } else if (emailStep?.status === "failed") {
-    parts.push("Email update failed.");
-  }
-
   if (callbackStep?.status === "completed") {
     parts.push("Callback delivered.");
   } else if (callbackStep?.status === "failed") {
@@ -378,25 +337,6 @@ function buildOutcomeSummary(task: ConciergeTaskRow, steps: ConciergeStepRow[]) 
   }
 
   return parts.filter(Boolean).join(" ").trim();
-}
-
-function buildUserEmailSubject(task: ConciergeTaskRow) {
-  return `Otto update: ${task.business_name || task.subject}`;
-}
-
-function buildUserEmailBody(task: ConciergeTaskRow, steps: ConciergeStepRow[]) {
-  const callStep = getCallStep(steps);
-
-  return [
-    `Otto update for ${task.business_name || task.subject}.`,
-    "",
-    cleanText(
-      callStep?.result_summary,
-      cleanText(task.result_summary, cleanText(task.latest_summary, task.call_goal)),
-    ),
-    "",
-    "Check the Otto inbox for the Firecrawl evidence and full call timeline.",
-  ].join("\n");
 }
 
 function buildCallbackScript(task: ConciergeTaskRow, steps: ConciergeStepRow[]) {
@@ -408,85 +348,41 @@ function buildCallbackScript(task: ConciergeTaskRow, steps: ConciergeStepRow[]) 
   ].join(" ");
 }
 
-function buildVoiceUrl(text: string, mode: "call" | "callback") {
-  const url = new URL(`${SUPABASE_URL}/functions/v1/otto-voice`);
-  url.searchParams.set("text", text);
-  url.searchParams.set("mode", mode);
-  url.searchParams.set("token", OTTO_WEBHOOK_SECRET);
-  return url.toString();
+export function getConversationLog(task: ConciergeTaskRow): ConversationEntry[] {
+  const fromColumn = Array.isArray(task.conversation_log) ? task.conversation_log : [];
+  const fromMetadata =
+    Array.isArray(task.metadata?.conversationLog) ? task.metadata.conversationLog : [];
+
+  return (fromColumn.length > 0 ? fromColumn : fromMetadata)
+    .map((entry) => {
+      const row = typeof entry === "object" && entry !== null ? entry as Record<string, unknown> : {};
+      const role = row.role === "agent" || row.role === "business" ? row.role : null;
+      const text = cleanText(row.text);
+      const at = cleanText(row.at, new Date().toISOString());
+
+      if (!role || !text) {
+        return null;
+      }
+
+      return { role, text, at } satisfies ConversationEntry;
+    })
+    .filter((entry): entry is ConversationEntry => Boolean(entry));
 }
 
-async function sendEmailForStep(task: ConciergeTaskRow, step: ConciergeStepRow, steps: ConciergeStepRow[]) {
-  const client = createServiceClient();
-  const transport = await smtpTransport();
-  let recipientEmail = step.recipient_email;
-  let recipientName = step.recipient_name;
-  const direction: "user_update" | "business_outreach" = step.step_type === "send_user_email" ? "user_update" : "business_outreach";
-
-  if (step.step_type === "send_user_email") {
-    const { data, error } = await client.auth.admin.getUserById(task.user_id);
-
-    if (error || !data.user?.email) {
-      throw new HttpError(500, "Could not resolve the user email address.");
-    }
-
-    recipientEmail = data.user.email;
-    recipientName = data.user.user_metadata?.full_name as string | undefined ?? null;
-  }
-
-  if (!recipientEmail) {
-    throw new HttpError(400, "Email recipient is missing.");
-  }
-
-  const subject = cleanText(step.email_subject, step.step_type === "send_user_email" ? buildUserEmailSubject(task) : step.title);
-  const body = cleanText(step.email_body, step.step_type === "send_user_email" ? buildUserEmailBody(task, steps) : step.title);
-  const { data: emailRow, error: insertError } = await client
-    .from("otto_task_emails")
-    .insert({
-      task_id: task.id,
-      step_id: step.id,
-      user_id: task.user_id,
-      direction,
-      recipient_name: recipientName,
-      recipient_email: recipientEmail,
-      subject,
-      body,
-      status: "pending",
-    })
-    .select("id")
-    .single();
-
-  if (insertError || !emailRow) {
-    throw new HttpError(500, "Could not create the email record.");
-  }
-
-  try {
-    const info = await transport.sendMail({
-      from: `${SMTP_FROM_NAME} <${SMTP_FROM_EMAIL}>`,
-      to: recipientName ? `${recipientName} <${recipientEmail}>` : recipientEmail,
-      subject,
-      text: body,
-    });
-
-    await client.from("otto_task_emails").update({
-      status: "sent",
-      provider_message_id: cleanText(info.messageId),
-      sent_at: new Date().toISOString(),
-    }).eq("id", emailRow.id);
-
-    await client.from("otto_task_steps").update({
-      status: "completed",
-      result_summary: `Email sent to ${recipientEmail}.`,
-      completed_at: new Date().toISOString(),
-    }).eq("id", step.id);
-  } catch (error) {
-    await client.from("otto_task_emails").update({
-      status: "failed",
-      error_message: error instanceof Error ? error.message : "Unknown email error",
-    }).eq("id", emailRow.id);
-
-    throw error;
-  }
+export async function persistConversationLog(
+  client: ReturnType<typeof createServiceClient>,
+  task: ConciergeTaskRow,
+  conversationLog: ConversationEntry[],
+  updates: Record<string, unknown> = {},
+) {
+  await client.from("otto_tasks").update({
+    ...updates,
+    conversation_log: conversationLog,
+    metadata: {
+      ...task.metadata,
+      conversationLog,
+    },
+  }).eq("id", task.id);
 }
 
 async function createTwilioCall(params: URLSearchParams) {
@@ -584,6 +480,43 @@ async function createCallbackCall(task: ConciergeTaskRow, step: ConciergeStepRow
   }).eq("id", task.id);
 }
 
+function deriveFinalTaskStatus(task: ConciergeTaskRow, steps: ConciergeStepRow[]) {
+  const callStep = getCallStep(steps);
+
+  if (!callStep) {
+    return {
+      status: "failed" as const,
+      inboxState: "failed" as const,
+    };
+  }
+
+  if (callStep.status === "declined") {
+    return {
+      status: "canceled" as const,
+      inboxState: "canceled" as const,
+    };
+  }
+
+  if (callStep.status === "failed") {
+    return {
+      status: "failed" as const,
+      inboxState: "failed" as const,
+    };
+  }
+
+  if (callStep.status === "completed") {
+    return {
+      status: "completed" as const,
+      inboxState: "completed" as const,
+    };
+  }
+
+  return {
+    status: task.status === "canceled" ? "canceled" as const : "failed" as const,
+    inboxState: task.inbox_state === "canceled" ? "canceled" as const : "failed" as const,
+  };
+}
+
 export async function executeTaskChain(taskId: string) {
   let bundle = await fetchTaskBundle(taskId);
 
@@ -615,23 +548,8 @@ export async function executeTaskChain(taskId: string) {
         return;
       }
 
-      if (step.step_type === "callback_user") {
-        await createCallbackCall(bundle.task, step, bundle.steps);
-        return;
-      }
-
-      if (step.step_type === "send_user_email" && !hasSmtpConfig()) {
-        await bundle.client.from("otto_task_steps").update({
-          status: "skipped",
-          result_summary: "Email follow-up skipped because SMTP is not configured.",
-          completed_at: new Date().toISOString(),
-        }).eq("id", step.id);
-        bundle = await fetchTaskBundle(taskId);
-        continue;
-      }
-
-      await sendEmailForStep(bundle.task, step, bundle.steps);
-      bundle = await fetchTaskBundle(taskId);
+      await createCallbackCall(bundle.task, step, bundle.steps);
+      return;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown step failure";
 
@@ -654,26 +572,19 @@ export async function executeTaskChain(taskId: string) {
   }
 
   const finalBundle = await fetchTaskBundle(taskId);
-  const hasCompletedSteps = finalBundle.steps.some((step) => step.status === "completed");
-  const hasFailedSteps = finalBundle.steps.some((step) => step.status === "failed");
-  const finalStatus = hasCompletedSteps ? "completed" : hasFailedSteps ? "failed" : "canceled";
+  const finalState = deriveFinalTaskStatus(finalBundle.task, finalBundle.steps);
   const finalSummary = buildOutcomeSummary(finalBundle.task, finalBundle.steps);
 
   await finalBundle.client.from("otto_tasks").update({
-    status: finalStatus,
-    inbox_state: finalStatus === "failed" ? "failed" : finalStatus === "canceled" ? "canceled" : "completed",
+    status: finalState.status,
+    inbox_state: finalState.inboxState,
     latest_summary: cleanText(finalSummary, finalBundle.task.latest_summary ?? finalBundle.task.call_goal),
     result_summary: cleanText(finalSummary, finalBundle.task.result_summary ?? finalBundle.task.call_goal),
     completed_at: new Date().toISOString(),
   }).eq("id", taskId);
 }
 
-export async function resolveApproval(
-  taskId: string,
-  approvalId: string,
-  userId: string,
-  decision: "approved" | "declined",
-) {
+export async function resolveApproval(taskId: string, approvalId: string, userId: string, decision: "approved" | "declined") {
   const client = createServiceClient();
   const { data: approval, error } = await client
     .from("otto_task_approvals")
