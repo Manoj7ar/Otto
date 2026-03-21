@@ -69,6 +69,11 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
       return stopStream;
     }
 
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      setCameraStatus("unavailable");
+      return stopStream;
+    }
+
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraStatus("unavailable");
       return stopStream;
@@ -76,8 +81,28 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
 
     setCameraStatus("requesting");
 
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: "environment" }, audio: false })
+    const requestStream = async () => {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
+        });
+      } catch (error) {
+        const domError = error as DOMException;
+
+        if (
+          domError?.name === "OverconstrainedError" ||
+          domError?.name === "NotFoundError" ||
+          domError?.name === "AbortError"
+        ) {
+          return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
+
+        throw error;
+      }
+    };
+
+    requestStream()
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
@@ -129,7 +154,7 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
       : cameraStatus === "denied"
         ? "Camera access was denied. Enable it in browser settings to use visual lookup."
         : cameraStatus === "unavailable"
-          ? "Camera not available on this device or browser."
+          ? "Camera requires HTTPS or localhost on mobile, or this browser/device does not expose a camera."
           : null;
 
   return (
@@ -144,16 +169,16 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
             exit={{ opacity: 0 }}
             transition={{ duration: 0.5 }}
           >
-            {cameraStatus === "ready" ? (
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center bg-muted/60 px-6 text-center">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`h-full w-full object-cover ${cameraStatus === "ready" ? "opacity-100" : "opacity-0"}`}
+            />
+
+            {cameraStatus !== "ready" && (
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/60 px-6 text-center">
                 <p className="max-w-sm text-sm text-secondary-otto">
                   {statusMessage ?? "Point your phone at the world to let Otto inspect the scene."}
                 </p>

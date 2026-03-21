@@ -36,7 +36,6 @@ function WavingOtterGreeting() {
       />
 
       <div className="mt-5 max-w-sm">
-        <p className="text-xs uppercase tracking-[0.28em] text-secondary-otto">Otto Is Ready</p>
         <p className="mt-3 text-sm leading-6 text-foreground/80">
           Ask a question, open the camera, or start speaking to begin.
         </p>
@@ -200,6 +199,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
 
     setCapturedImageBase64(frame);
     setFlashCount((count) => count + 1);
+    setCameraEnabled(false);
   }, []);
 
   const handleRetakePhoto = useCallback(() => {
@@ -220,6 +220,8 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
 
       if (imageOverride) {
         imageBase64 = imageOverride;
+      } else if (capturedImageBase64) {
+        imageBase64 = capturedImageBase64;
       } else if (cameraEnabled) {
         const frame = cameraRef.current?.captureFrame();
 
@@ -246,7 +248,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
         setIsProcessing(false);
       }
     },
-    [cameraEnabled, resetTranscript, sessionContext, stopSpeaking]
+    [cameraEnabled, capturedImageBase64, resetTranscript, sessionContext, stopSpeaking]
   );
 
   const handleMicToggle = useCallback(
@@ -358,25 +360,6 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {cameraEnabled && capturedPreviewUrl && !isProcessing && (
-          <motion.div
-            className="pointer-events-none fixed left-1/2 top-1/2 z-20 w-[min(72vw,18rem)] -translate-x-1/2 -translate-y-1/2"
-            initial={{ opacity: 0, scale: 0.92, y: 24 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.92, y: 24 }}
-          >
-            <div className="glass-strong overflow-hidden rounded-[1.75rem] p-2 shadow-[0_18px_50px_hsl(28_28%_42%_/_0.14)]">
-              <img
-                src={capturedPreviewUrl}
-                alt="Captured preview"
-                className="aspect-[3/4] w-full rounded-[1.25rem] object-cover"
-              />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {!cameraEnabled && (
         <div className="mx-auto flex h-full w-full max-w-5xl flex-1 flex-col overflow-hidden px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-6 sm:px-6">
           <div className="mb-5 flex items-center justify-end gap-3">
@@ -400,8 +383,8 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
             </div>
           </div>
 
-          <div className="glass-strong flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2rem]">
-            <div className="flex-1 space-y-5 overflow-hidden px-4 py-5 sm:px-6 sm:py-6">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-2 py-2 sm:px-3 sm:py-3">
               <AnimatePresence mode="wait">
                 {showGreeting && <WavingOtterGreeting key="greeting" />}
               </AnimatePresence>
@@ -436,7 +419,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                         <img
                           src="/otter.png"
                           alt="Otter"
-                          className="mt-1 h-11 w-11 rounded-full border border-black/10 bg-white/45 object-cover p-1"
+                          className="mt-1 h-11 w-11 object-cover"
                         />
                         <div className="min-w-0 flex-1">
                           <span className="px-2 text-[11px] uppercase tracking-[0.22em] text-secondary-otto">Back to me</span>
@@ -501,7 +484,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                         <img
                           src="/otter.png"
                           alt="Otter"
-                          className="mt-1 h-11 w-11 rounded-full border border-black/10 bg-white/45 object-cover p-1"
+                          className="mt-1 h-11 w-11 object-cover"
                         />
                         <div className="min-w-0 flex-1">
                           <span className="px-2 text-[11px] uppercase tracking-[0.22em] text-secondary-otto">Otter is thinking</span>
@@ -539,7 +522,9 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
           onSubmit={handleSubmit}
           onCameraClick={handleCameraToggle}
           onMicToggle={handleMicToggle}
+          onClearAttachment={handleRetakePhoto}
           isCameraActive={cameraEnabled}
+          hasImageAttachment={Boolean(capturedImageBase64)}
           isListening={isListening}
           isLiveMode={isLiveMode}
           isLivePaused={liveAgentPaused}
@@ -559,35 +544,15 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
               transition={{ type: "spring", stiffness: 300, damping: 30 }}
             >
               <div className="mx-auto flex max-w-sm flex-col items-center gap-4">
-                {capturedImageBase64 ? (
-                  <div className="flex w-full items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={handleRetakePhoto}
-                      className="glass-button flex h-14 w-14 shrink-0 items-center justify-center rounded-full"
-                      aria-label="Retake photo"
-                    >
-                      <RotateCcw size={18} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleSubmit("Carry out the task for me.", capturedImageBase64)}
-                      className="glass-button-primary min-h-[3.5rem] flex-1 rounded-full px-6 py-4 text-sm font-medium"
-                    >
-                      Ask Otto to carry out the task for me
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleCapturePhoto}
-                    disabled={!canCapturePhoto}
-                    className="glass-strong flex h-20 w-20 items-center justify-center rounded-full disabled:opacity-45"
-                    aria-label="Take photo"
-                  >
-                    <span className="h-16 w-16 rounded-full border border-black/10 bg-white/55" />
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={handleCapturePhoto}
+                  disabled={!canCapturePhoto}
+                  className="glass-strong flex h-20 w-20 items-center justify-center rounded-full disabled:opacity-45"
+                  aria-label="Take photo"
+                >
+                  <span className="h-16 w-16 rounded-full border border-black/10 bg-white/55" />
+                </button>
               </div>
             </motion.div>
           )}

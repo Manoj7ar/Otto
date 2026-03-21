@@ -1,12 +1,14 @@
 import { useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Camera, Mic, MicOff, SendHorizontal } from "lucide-react";
+import { Camera, Mic, MicOff, Paperclip, SendHorizontal, X } from "lucide-react";
 
 interface InputBarProps {
   onSubmit: (text: string) => void;
   onCameraClick: () => void;
   onMicToggle: (liveMode: boolean) => void;
+  onClearAttachment: () => void;
   isCameraActive: boolean;
+  hasImageAttachment: boolean;
   isListening: boolean;
   isLiveMode: boolean;
   isLivePaused: boolean;
@@ -19,7 +21,9 @@ export default function InputBar({
   onSubmit,
   onCameraClick,
   onMicToggle,
+  onClearAttachment,
   isCameraActive,
+  hasImageAttachment,
   isListening,
   isLiveMode,
   isLivePaused,
@@ -72,8 +76,40 @@ export default function InputBar({
       transition={{ type: "spring", stiffness: 300, damping: 30, delay: 0.3 }}
       style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
     >
-      <div className="glass-strong mx-auto flex max-w-xl items-center gap-2 rounded-[1.75rem] px-3 py-3 sm:gap-3 sm:rounded-[2rem] sm:px-4 sm:py-4">
-        <div className="glass flex flex-1 items-center gap-2 rounded-full px-3 py-3 sm:gap-3 sm:px-4">
+      <div className="glass-strong mx-auto max-w-xl rounded-[1.75rem] px-3 py-3 sm:rounded-[2rem] sm:px-4 sm:py-4">
+        {hasImageAttachment && !isLiveMode && (
+          <div className="mb-3 flex items-center justify-center sm:justify-start">
+            <div className="glass inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs text-foreground">
+              <Paperclip size={14} />
+              <span>Image attached</span>
+              <button
+                type="button"
+                onClick={onClearAttachment}
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full text-secondary-otto"
+                aria-label="Remove attached image"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-[3.5rem_minmax(0,1fr)_3.5rem] items-center gap-2 sm:flex sm:gap-3">
+        <motion.button
+          type="button"
+          onClick={onCameraClick}
+          disabled={isProcessing}
+          className={`glass-pill flex h-14 w-14 shrink-0 items-center justify-center justify-self-start disabled:opacity-40 sm:h-12 sm:w-12 ${
+            isCameraActive ? "border-amber-900/10 bg-amber-100/18" : ""
+          }`}
+          whileTap={{ scale: 0.92 }}
+          whileHover={{ scale: 1.04 }}
+          aria-label="Toggle camera"
+        >
+          <Camera size={20} className={isCameraActive ? "text-primary" : "text-secondary-otto"} />
+        </motion.button>
+
+        <div className="glass flex min-w-0 items-center gap-2 rounded-full px-3 py-3 sm:flex-1 sm:gap-3 sm:px-4">
           {isLiveMode && (
             <span
               className={`rounded-full px-3 py-1 text-[10px] font-medium uppercase tracking-[0.22em] ${
@@ -97,19 +133,19 @@ export default function InputBar({
               isLiveMode
                 ? isLivePaused
                   ? "Live agent paused while Otto responds..."
-                  : "Listening for your next question..."
-                : "Ask Otto about what you see..."
+                  : "Listening..."
+                : "Type here..."
             }
             disabled={isProcessing && !isLiveMode}
             readOnly={isLiveMode}
-            className="flex-1 bg-transparent text-sm font-light tracking-[0.02em] text-foreground placeholder:text-secondary-otto outline-none disabled:opacity-50"
+            className="min-w-0 flex-1 bg-transparent text-center text-sm font-light tracking-[0.02em] text-foreground placeholder:text-center placeholder:text-secondary-otto outline-none disabled:opacity-50 sm:text-left sm:placeholder:text-left"
           />
         </div>
 
         {hasContent && !isLiveMode && (
           <motion.button
             onClick={handleSend}
-            className="glass-button-primary flex h-12 w-12 items-center justify-center rounded-full"
+            className="glass-button-primary absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-10 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full sm:static sm:bottom-auto sm:left-auto sm:z-auto sm:h-12 sm:w-12 sm:translate-x-0"
             whileTap={{ scale: 0.92 }}
             whileHover={{ scale: 1.03 }}
             initial={{ scale: 0, opacity: 0 }}
@@ -121,21 +157,8 @@ export default function InputBar({
         )}
 
         <motion.button
-          onClick={onCameraClick}
-          disabled={isProcessing}
-          className={`glass-pill flex h-12 w-12 items-center justify-center disabled:opacity-40 ${
-            isCameraActive ? "border-amber-900/10 bg-amber-100/18" : ""
-          }`}
-          whileTap={{ scale: 0.92 }}
-          whileHover={{ scale: 1.04 }}
-          aria-label="Toggle camera"
-        >
-          <Camera size={18} className={isCameraActive ? "text-primary" : "text-secondary-otto"} />
-        </motion.button>
-
-        <motion.button
           onClick={handleMicClick}
-          className={`flex h-12 w-12 items-center justify-center rounded-full disabled:opacity-40 ${
+          className={`flex h-14 w-14 shrink-0 items-center justify-center justify-self-end rounded-full disabled:opacity-40 sm:h-12 sm:w-12 ${
             !isMicSupported
               ? "glass-button text-secondary-otto"
               : isLiveMode
@@ -152,11 +175,12 @@ export default function InputBar({
           transition={isLiveMode ? { duration: 1.5, repeat: Infinity } : {}}
         >
           {isLiveMode ? (
-            <MicOff size={18} className="text-primary-foreground" />
+            <MicOff size={20} className="text-primary-foreground" />
           ) : (
-            <Mic size={18} className={isMicSupported ? "text-primary-foreground" : "text-secondary-otto"} />
+            <Mic size={20} className={isMicSupported ? "text-primary-foreground" : "text-secondary-otto"} />
           )}
         </motion.button>
+        </div>
       </div>
     </motion.div>
   );

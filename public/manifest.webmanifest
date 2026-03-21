@@ -1,0 +1,25 @@
+{
+  "name": "Otto",
+  "short_name": "Otto",
+  "description": "Otto is a mobile AI concierge powered by Firecrawl, ElevenLabs, Supabase, and Twilio.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#d3c0ad",
+  "theme_color": "#c9b6a3",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/otter.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/otter.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
