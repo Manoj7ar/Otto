@@ -124,22 +124,16 @@ export default function ProfileForm({
             onChange={(event) => setValue("callbackPhone", event.target.value)}
             placeholder="+44 7..."
             className="mt-3 w-full bg-transparent text-base outline-none placeholder:text-secondary-otto/60"
+            required
           />
         </label>
 
-        <label className="glass-panel flex items-center justify-between rounded-3xl p-4 sm:col-span-2">
-          <div>
-            <span className="text-xs uppercase tracking-[0.2em] text-secondary-otto">Call briefing</span>
-            <p className="mt-2 text-sm text-foreground/80">Allow Otto to call you back with the task result after cloud-run calls finish.</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setValue("callBriefingEnabled", !values.callBriefingEnabled)}
-            className={`glass-pill px-4 py-2 text-sm ${values.callBriefingEnabled ? "bg-cyan-300/15 text-foreground" : "text-secondary-otto"}`}
-          >
-            {values.callBriefingEnabled ? "Enabled" : "Disabled"}
-          </button>
-        </label>
+        <div className="glass-panel rounded-3xl p-4 sm:col-span-2">
+          <span className="text-xs uppercase tracking-[0.2em] text-secondary-otto">Cloud callback</span>
+          <p className="mt-3 text-sm leading-6 text-foreground/80">
+            Otto uses this number to call you back after cloud-run business calls finish, even if you leave the app.
+          </p>
+        </div>
       </div>
 
       <button

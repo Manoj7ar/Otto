@@ -29,7 +29,7 @@ const latestReply: OttoReplyData = {
     { label: "What Otto saw", value: "A large stone museum entrance with columns." },
     { label: "Web verification", value: "Checked the official museum site." },
   ],
-  proposedTask: null,
+  callProposal: null,
 };
 
 const sessionContext: OttoSessionContext = {

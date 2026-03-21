@@ -211,14 +211,14 @@ export default function SessionDrawer({
                       </div>
                     )}
 
-                    {isLatestAssistantTurn && turn.reply.proposedTask && (
+                    {isLatestAssistantTurn && turn.reply.callProposal && (
                       <button
                         type="button"
                         onClick={onReviewTaskProposal}
                         className="glass-button-primary inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-medium"
                       >
                         <Phone size={14} />
-                        Review call approval
+                        Review call proposal
                       </button>
                     )}
 

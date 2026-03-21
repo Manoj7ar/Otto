@@ -11,12 +11,12 @@ import {
 } from "@/features/account/profile";
 import OnboardingScreen from "@/features/onboarding/components/OnboardingScreen";
 import OttoPage from "@/features/otto/screens/OttoPage";
+import { fetchInboxTasks } from "@/features/tasks/api/fetchInboxTasks";
 import TaskHistoryPanel from "@/features/tasks/components/TaskHistoryPanel";
+import type { InboxTask } from "@/features/tasks/types";
 import { supabase } from "@/shared/supabase/client";
-import type { Database } from "@/shared/supabase/types";
 
 type AppTab = "otto" | "tasks" | "account";
-type OttoTaskRow = Database["public"]["Tables"]["otto_tasks"]["Row"];
 
 function AppLoadingState() {
   return (
@@ -31,7 +31,7 @@ function AppLoadingState() {
 export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [profile, setProfile] = useState<ProfileRow | null>(null);
-  const [tasks, setTasks] = useState<OttoTaskRow[]>([]);
+  const [tasks, setTasks] = useState<InboxTask[]>([]);
   const [activeTab, setActiveTab] = useState<AppTab>("otto");
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -62,18 +62,7 @@ export default function App() {
     setLoadingTasks(true);
 
     try {
-      const { data, error } = await supabase
-        .from("otto_tasks")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(25);
-
-      if (error) {
-        throw error;
-      }
-
-      setTasks(data ?? []);
+      setTasks(await fetchInboxTasks(userId));
     } finally {
       setLoadingTasks(false);
     }
@@ -131,19 +120,64 @@ export default function App() {
     };
   }, [loadProfile, loadTasks]);
 
-  const handleSendMagicLink = useCallback(async (email: string) => {
-    const { error } = await supabase.auth.signInWithOtp({
+  const handleAuthSubmit = useCallback(async (mode: "sign_in" | "sign_up", email: string, password: string) => {
+    const trimmedPassword = password.trim();
+
+    if (mode === "sign_in" && !trimmedPassword) {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: window.location.origin,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      toast.success("Magic link sent.");
+      return;
+    }
+
+    if (!trimmedPassword) {
+      throw new Error("Password is required.");
+    }
+
+    if (mode === "sign_in") {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: trimmedPassword,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data.session) {
+        toast.success("Signed in.");
+      }
+
+      return;
+    }
+
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
       email,
+      password: trimmedPassword,
       options: {
         emailRedirectTo: window.location.origin,
       },
     });
 
-    if (error) {
-      throw error;
+    if (signUpError) {
+      throw signUpError;
     }
 
-    toast.success("Magic link sent.");
+    if (signUpData.session) {
+      toast.success("Account created.");
+      return;
+    }
+
+    toast.success("Check your email to confirm the new account.");
   }, []);
 
   const handleSaveProfile = useCallback(
@@ -199,6 +233,26 @@ export default function App() {
     await loadTasks(session.user.id);
   }, [loadTasks, session?.user.id]);
 
+  useEffect(() => {
+    if (activeTab !== "tasks" || !session?.user.id) {
+      return;
+    }
+
+    const hasActiveTasks = tasks.some((task) => task.inbox_state === "active" || task.inbox_state === "waiting_approval");
+
+    if (!hasActiveTasks) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadTasks(session.user.id).catch((error) => {
+        console.error("task_poll_error", error);
+      });
+    }, 10000);
+
+    return () => window.clearInterval(intervalId);
+  }, [activeTab, loadTasks, session?.user.id, tasks]);
+
   if (session === undefined || loadingProfile) {
     return (
       <>
@@ -237,7 +291,7 @@ export default function App() {
         }}
       />
 
-      {!user && <AuthScreen onSendMagicLink={handleSendMagicLink} />}
+      {!user && <AuthScreen onSubmit={handleAuthSubmit} />}
 
       {user && !onboardingComplete && (
         <OnboardingScreen profile={profile} busy={savingProfile} onSubmit={handleSaveProfile} />
@@ -250,7 +304,7 @@ export default function App() {
               <div>
                 <p className="text-sm uppercase tracking-[0.24em] text-secondary-otto">Otto cloud agent</p>
                 <p className="mt-1 text-sm text-foreground/85">
-                  {profile.current_region} • {profile.travel_mode}
+                  {profile.current_region} | {profile.travel_mode}
                 </p>
               </div>
 

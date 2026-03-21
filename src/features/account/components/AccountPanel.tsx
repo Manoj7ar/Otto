@@ -18,7 +18,7 @@ export default function AccountPanel({ profile, email, busy = false, onSave, onS
       <div className="mb-6 flex items-center justify-between gap-4">
         <div>
           <p className="text-sm uppercase tracking-[0.24em] text-secondary-otto">Account</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Preferences and callback defaults</h1>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Cloud call profile</h1>
           {email && <p className="mt-3 text-sm text-secondary-otto">Signed in as {email}</p>}
         </div>
         <button
@@ -40,7 +40,7 @@ export default function AccountPanel({ profile, email, busy = false, onSave, onS
         busy={busy}
         submitLabel="Save profile"
         title="Keep Otto's cloud context accurate"
-        description="These fields shape how Otto searches, plans, and briefs you after business calls."
+        description="These fields shape how Otto researches, who it calls, and the number it uses to call you back after cloud-run business calls."
         onSubmit={onSave}
       />
     </div>

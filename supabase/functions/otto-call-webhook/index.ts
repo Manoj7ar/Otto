@@ -1,5 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
+import {
+  cleanText,
+  createServiceClient,
+  executeTaskChain,
+  fetchTaskBundle,
+  HttpError,
+} from "../_shared/otto-concierge.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,51 +14,14 @@ const corsHeaders = {
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const OTTO_WEBHOOK_SECRET = Deno.env.get("OTTO_WEBHOOK_SECRET") ?? "";
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GOOGLE_API_KEY");
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
-const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") ?? "";
-const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") ?? "";
-const TWILIO_PHONE_NUMBER = Deno.env.get("TWILIO_PHONE_NUMBER") ?? "";
-const OTTO_WEBHOOK_SECRET = Deno.env.get("OTTO_WEBHOOK_SECRET") ?? "";
-
-type TaskStatus = "queued" | "dialing" | "in_progress" | "completed" | "failed" | "canceled";
-type DecisionStatus = "continue" | "complete" | "failed";
-
-interface TaskRow {
-  id: string;
-  status: TaskStatus;
-  task_type: "verification" | "booking";
-  subject: string;
-  business_name: string;
-  business_phone: string | null;
-  business_website: string | null;
-  call_goal: string;
-  approval_summary: string;
-  approved_scope: string[];
-  request_query: string;
-  result_summary: string | null;
-  result_structured: Record<string, unknown>;
-  conversation_log: Array<Record<string, unknown>>;
-  metadata: Record<string, unknown>;
-  twilio_call_sid: string | null;
-  callback_call_sid: string | null;
-}
 
 interface GeminiDecision {
-  status: DecisionStatus;
+  status: "continue" | "complete" | "failed";
   nextQuestion: string;
   resultSummary: string;
-  facts: Array<{ label: string; value: string }>;
-}
-
-class HttpError extends Error {
-  status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
 }
 
 const decisionSchema = {
@@ -61,32 +30,9 @@ const decisionSchema = {
     status: { type: "STRING", enum: ["continue", "complete", "failed"] },
     nextQuestion: { type: "STRING" },
     resultSummary: { type: "STRING" },
-    facts: {
-      type: "ARRAY",
-      items: {
-        type: "OBJECT",
-        properties: {
-          label: { type: "STRING" },
-          value: { type: "STRING" },
-        },
-        required: ["label", "value"],
-      },
-    },
   },
-  required: ["status", "nextQuestion", "resultSummary", "facts"],
+  required: ["status", "nextQuestion", "resultSummary"],
 };
-
-function serviceClient() {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw new HttpError(500, "Supabase service role is not configured.");
-  }
-
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-}
-
-function cleanText(value: unknown, fallback = "") {
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
-}
 
 function xml(text: string) {
   return new Response(text, {
@@ -149,7 +95,7 @@ function getGeminiText(response: unknown): string {
   return text;
 }
 
-async function callGeminiDecision(task: TaskRow, latestSpeech: string): Promise<GeminiDecision> {
+async function callGeminiDecision(summary: string, conversationLog: unknown[], latestSpeech: string, questions: string[]): Promise<GeminiDecision> {
   if (!GEMINI_API_KEY) {
     throw new HttpError(500, "GEMINI_API_KEY not configured.");
   }
@@ -163,11 +109,10 @@ async function callGeminiDecision(task: TaskRow, latestSpeech: string): Promise<
         systemInstruction: {
           parts: [{
             text: [
-              "You are Otto, a conservative cloud phone agent.",
+              "You are Otto, a conservative phone agent.",
               "Decide whether to continue, complete, or fail the business call.",
-              "Never ask for payment data or improvise outside approved_scope.",
-              "Return complete when the business clearly answered the task.",
-              "Return failed when the business response is unclear, requests outside-scope information, or the task cannot continue safely.",
+              "Stay focused on the approved call reason and question list only.",
+              "Return continue only when one short follow-up question is genuinely needed.",
             ].join("\n"),
           }],
         },
@@ -175,12 +120,9 @@ async function callGeminiDecision(task: TaskRow, latestSpeech: string): Promise<
           role: "user",
           parts: [{
             text: JSON.stringify({
-              taskType: task.task_type,
-              callGoal: task.call_goal,
-              approvalSummary: task.approval_summary,
-              approvedScope: task.approved_scope,
-              questionPlan: (task.metadata?.questions as string[] | undefined) ?? [],
-              priorConversation: task.conversation_log,
+              approvedSummary: summary,
+              callQuestions: questions,
+              priorConversation: conversationLog,
               latestSpeech,
             }),
           }],
@@ -188,7 +130,7 @@ async function callGeminiDecision(task: TaskRow, latestSpeech: string): Promise<
         generationConfig: {
           temperature: 0.2,
           candidateCount: 1,
-          maxOutputTokens: 900,
+          maxOutputTokens: 700,
           responseMimeType: "application/json",
           responseSchema: decisionSchema,
         },
@@ -209,72 +151,7 @@ async function callGeminiDecision(task: TaskRow, latestSpeech: string): Promise<
     status: parsed.status === "complete" || parsed.status === "failed" ? parsed.status : "continue",
     nextQuestion: cleanText(parsed.nextQuestion),
     resultSummary: cleanText(parsed.resultSummary),
-    facts: Array.isArray(parsed.facts)
-      ? parsed.facts
-        .map((fact) => ({
-          label: cleanText(fact?.label),
-          value: cleanText(fact?.value),
-        }))
-        .filter((fact) => fact.label && fact.value)
-      : [],
   };
-}
-
-async function getTask(taskId: string) {
-  const client = serviceClient();
-  const { data, error } = await client
-    .from("otto_tasks")
-    .select("*")
-    .eq("id", taskId)
-    .maybeSingle();
-
-  if (error || !data) {
-    throw new HttpError(404, "Task not found.");
-  }
-
-  return { client, task: data as TaskRow };
-}
-
-async function updateTask(taskId: string, values: Record<string, unknown>) {
-  const client = serviceClient();
-  await client.from("otto_tasks").update(values).eq("id", taskId);
-}
-
-async function createCallbackCall(task: TaskRow, summary: string) {
-  const callbackPhone = cleanText(task.metadata?.callbackPhone);
-  const callbackEnabled = Boolean(task.metadata?.callbackEnabled);
-
-  if (!callbackEnabled || !callbackPhone || task.callback_call_sid) {
-    return;
-  }
-
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl(summary, "callback"))}</Play><Hangup/></Response>`;
-  const params = new URLSearchParams({
-    From: TWILIO_PHONE_NUMBER,
-    To: callbackPhone,
-    Twiml: twiml,
-  });
-
-  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: params.toString(),
-  });
-
-  if (!response.ok) {
-    console.error("callback_call_error", await response.text());
-    return;
-  }
-
-  const call = await response.json();
-  await updateTask(task.id, { callback_call_sid: cleanText(call.sid) });
-}
-
-function openingPrompt(task: TaskRow) {
-  return `Hello, this is Otto calling for a customer. I would like to ${task.task_type === "booking" ? "check whether you can help with a booking" : "verify a few details"} about ${task.subject}. ${task.call_goal}. Can you help me with that?`;
 }
 
 serve(async (req) => {
@@ -288,33 +165,100 @@ serve(async (req) => {
     const token = cleanText(url.searchParams.get("token"));
     const step = cleanText(url.searchParams.get("step"));
     const turn = Number(url.searchParams.get("turn") ?? "1");
+    const stepId = cleanText(url.searchParams.get("stepId"));
 
-    if (!taskId || !token || token !== OTTO_WEBHOOK_SECRET) {
+    if (!taskId || token !== OTTO_WEBHOOK_SECRET) {
       throw new HttpError(401, "Invalid webhook token.");
     }
 
-    const { task } = await getTask(taskId);
+    const { task, steps } = await fetchTaskBundle(taskId);
+    const client = createServiceClient();
+    const callStep = steps.find((item) => item.step_type === "call_business");
+    const callbackStep = stepId
+      ? steps.find((item) => item.id === stepId && item.step_type === "callback_user")
+      : steps.find((item) => item.step_type === "callback_user");
+
+    if (step === "callback") {
+      if (!callbackStep) {
+        throw new HttpError(404, "No callback step is associated with this task.");
+      }
+
+      const script = cleanText(callbackStep.payload?.script, "Hi, this is Otto with your update. The task has finished.");
+      return xml(
+        `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl(script, "callback"))}</Play><Hangup/></Response>`,
+      );
+    }
+
+    if (step === "callback-status") {
+      if (!callbackStep) {
+        throw new HttpError(404, "No callback step is associated with this task.");
+      }
+
+      const form = await req.formData();
+      const callStatus = cleanText(form.get("CallStatus"));
+
+      if (callStatus === "completed") {
+        await client.from("otto_task_steps").update({
+          status: "completed",
+          result_summary: "Callback briefing delivered.",
+          completed_at: new Date().toISOString(),
+        }).eq("id", callbackStep.id);
+      } else if (callStatus === "busy" || callStatus === "failed" || callStatus === "no-answer") {
+        await client.from("otto_task_steps").update({
+          status: "failed",
+          result_summary: "Could not reach you for the callback briefing.",
+          completed_at: new Date().toISOString(),
+        }).eq("id", callbackStep.id);
+      }
+
+      await executeTaskChain(taskId);
+      return new Response("ok", { headers: corsHeaders });
+    }
+
+    if (!callStep) {
+      throw new HttpError(404, "No business call step is associated with this task.");
+    }
 
     if (step === "intro") {
-      await updateTask(taskId, { status: "in_progress" });
-      return buildGatherResponse(taskId, openingPrompt(task), 1);
+      const callQuestions = Array.isArray(callStep.payload?.questions)
+        ? (callStep.payload.questions as unknown[]).map((entry) => cleanText(entry)).filter(Boolean).slice(0, 2)
+        : [];
+      const prompt = callQuestions.length > 0
+        ? `Hello, this is Otto calling for a customer. I am verifying ${task.call_goal}. I specifically need to confirm ${callQuestions.join(" and ")}. Can you help me with that?`
+        : `Hello, this is Otto calling for a customer. ${callStep.approval_summary ?? task.call_goal}. Can you help me with that?`;
+
+      await client.from("otto_task_steps").update({ status: "running" }).eq("id", callStep.id);
+      await client.from("otto_tasks").update({
+        status: "in_progress",
+        inbox_state: "active",
+        latest_step_label: callStep.title,
+        latest_summary: callStep.approval_summary ?? callStep.title,
+      }).eq("id", taskId);
+
+      return buildGatherResponse(taskId, prompt, 1);
     }
 
     if (step === "status") {
       const form = await req.formData();
       const callStatus = cleanText(form.get("CallStatus"));
-      const nextStatus: TaskStatus =
-        callStatus === "completed"
-          ? task.status
-          : callStatus === "in-progress" || callStatus === "answered"
-            ? "in_progress"
-            : callStatus === "ringing"
-              ? "dialing"
-              : callStatus === "busy" || callStatus === "failed" || callStatus === "no-answer"
-                ? "failed"
-                : task.status;
 
-      await updateTask(taskId, { status: nextStatus });
+      if (callStatus === "busy" || callStatus === "failed" || callStatus === "no-answer") {
+        await client.from("otto_task_steps").update({
+          status: "failed",
+          result_summary: "The business call could not be completed.",
+          completed_at: new Date().toISOString(),
+        }).eq("id", callStep.id);
+
+        await client.from("otto_tasks").update({
+          status: "in_progress",
+          inbox_state: "active",
+          latest_summary: "The business call could not be completed.",
+          result_summary: "The business call could not be completed.",
+        }).eq("id", taskId);
+
+        await executeTaskChain(taskId);
+      }
+
       return new Response("ok", { headers: corsHeaders });
     }
 
@@ -324,7 +268,12 @@ serve(async (req) => {
 
     const form = await req.formData();
     const latestSpeech = cleanText(form.get("SpeechResult"));
-    const conversationLog = Array.isArray(task.conversation_log) ? [...task.conversation_log] : [];
+    const conversationLog = Array.isArray(task.metadata?.conversationLog)
+      ? [...(task.metadata.conversationLog as unknown[])]
+      : [];
+    const callQuestions = Array.isArray(callStep.payload?.questions)
+      ? (callStep.payload.questions as unknown[]).map((entry) => cleanText(entry)).filter(Boolean)
+      : [];
 
     if (latestSpeech) {
       conversationLog.push({
@@ -335,28 +284,32 @@ serve(async (req) => {
     }
 
     if (!latestSpeech && turn >= 2) {
-      const summary = "The business line did not provide a clear spoken response, so Otto stopped the task safely.";
-      await updateTask(taskId, {
+      await client.from("otto_task_steps").update({
         status: "failed",
-        result_summary: summary,
+        result_summary: "The business line did not provide a clear spoken response.",
         completed_at: new Date().toISOString(),
-        conversation_log: conversationLog,
-      });
-      await createCallbackCall(task, summary);
-      return xml(`<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl("No problem. I will stop here for now. Goodbye.", "call"))}</Play><Hangup/></Response>`);
+      }).eq("id", callStep.id);
+
+      await client.from("otto_tasks").update({
+        status: "in_progress",
+        inbox_state: "active",
+        latest_summary: "The business line did not provide a clear spoken response.",
+        result_summary: "The business line did not provide a clear spoken response.",
+        metadata: {
+          ...task.metadata,
+          conversationLog,
+        },
+      }).eq("id", taskId);
+
+      await executeTaskChain(taskId);
+      return xml(`<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl("No problem. I will stop here for now. Goodbye."))}</Play><Hangup/></Response>`);
     }
 
     if (!latestSpeech) {
       return buildGatherResponse(taskId, "I did not catch that. Could you repeat that once more?", turn + 1);
     }
 
-    const decision = await callGeminiDecision(
-      {
-        ...task,
-        conversation_log: conversationLog,
-      },
-      latestSpeech,
-    );
+    const decision = await callGeminiDecision(callStep.approval_summary ?? task.call_goal, conversationLog, latestSpeech, callQuestions);
 
     if (decision.status === "continue" && turn < 3 && decision.nextQuestion) {
       conversationLog.push({
@@ -365,39 +318,45 @@ serve(async (req) => {
         at: new Date().toISOString(),
       });
 
-      await updateTask(taskId, {
-        status: "in_progress",
-        conversation_log: conversationLog,
-        result_structured: {
-          facts: decision.facts,
+      await client.from("otto_tasks").update({
+        metadata: {
+          ...task.metadata,
+          conversationLog,
         },
-      });
+      }).eq("id", taskId);
 
       return buildGatherResponse(taskId, decision.nextQuestion, turn + 1);
     }
 
-    const finalStatus: TaskStatus = decision.status === "failed" ? "failed" : "completed";
+    const finalStatus = decision.status === "failed" ? "failed" : "completed";
     const finalSummary = cleanText(
       decision.resultSummary,
       finalStatus === "completed"
-        ? "Otto completed the business call and captured the result."
-        : "Otto stopped the task because the call could not be completed safely.",
+        ? "The business call completed successfully."
+        : "The business call stopped without a clear outcome.",
     );
 
-    await updateTask(taskId, {
+    await client.from("otto_task_steps").update({
       status: finalStatus,
       result_summary: finalSummary,
-      result_structured: {
-        facts: decision.facts,
-      },
       completed_at: new Date().toISOString(),
-      conversation_log: conversationLog,
-    });
+    }).eq("id", callStep.id);
 
-    await createCallbackCall(task, finalSummary);
+    await client.from("otto_tasks").update({
+      status: "in_progress",
+      inbox_state: "active",
+      latest_summary: finalSummary,
+      result_summary: finalSummary,
+      metadata: {
+        ...task.metadata,
+        conversationLog,
+      },
+    }).eq("id", taskId);
+
+    await executeTaskChain(taskId);
 
     return xml(
-      `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl("Thank you. That is all I needed today. Goodbye.", "call"))}</Play><Hangup/></Response>`,
+      `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl("Thank you. That is all I needed today. Goodbye."))}</Play><Hangup/></Response>`,
     );
   } catch (error) {
     console.error("otto_call_webhook_error", error);

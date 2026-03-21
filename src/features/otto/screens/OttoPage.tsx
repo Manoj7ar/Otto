@@ -133,7 +133,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
   }, [isMuted, latestReply, speakResponse]);
 
   useEffect(() => {
-    if (latestReply?.proposedTask) {
+    if (latestReply?.callProposal) {
       setApprovalVisible(true);
     }
   }, [latestReply]);
@@ -245,25 +245,30 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
   }, [resetTranscript, stopListening, stopSpeaking]);
 
   const handleApproveTask = useCallback(async () => {
-    if (!latestReply?.proposedTask) {
+    if (!latestReply?.callProposal) {
+      return;
+    }
+
+    if (!profile.callback_phone) {
+      toast.error("Add a callback phone number in your profile before starting cloud calls.");
       return;
     }
 
     setApprovingTask(true);
 
     try {
-      await approveOttoTask(latestQuery, latestReply.subject, latestReply.proposedTask);
+      await approveOttoTask(latestQuery, latestReply.subject, latestReply.callProposal);
       await onTaskCreated();
       setApprovalVisible(false);
-      toast.success("Cloud call task started.");
+      toast.success("Cloud call started. You can leave the app.");
       onOpenTasks();
     } catch (error) {
       console.error("otto_task_approval_error", error);
-      toast.error(error instanceof Error ? error.message : "Could not start the cloud call task.");
+      toast.error(error instanceof Error ? error.message : "Could not start the cloud call.");
     } finally {
       setApprovingTask(false);
     }
-  }, [latestQuery, latestReply, onOpenTasks, onTaskCreated]);
+  }, [latestQuery, latestReply, onOpenTasks, onTaskCreated, profile.callback_phone]);
 
   const showGreeting = !cameraEnabled && !hasSessionTurns && !isProcessing;
   const showMiniOrb = cameraEnabled || hasSessionTurns || isProcessing;
@@ -363,7 +368,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.35, duration: 0.5 }}
               >
-                Point, ask, verify, and launch cloud call tasks.
+                Point, ask, research, and let Otto call when needed.
               </motion.h1>
               <motion.p
                 className="mt-4 max-w-sm text-sm leading-6 text-secondary-otto"
@@ -371,7 +376,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.45, duration: 0.5 }}
               >
-                Otto now uses your saved location, language, timezone, and callback preferences to plan research and business calls in the cloud.
+                Firecrawl does the research. Gemini decides if a call would help. Otto can call, follow up, and call you back even after you leave the app.
               </motion.p>
             </div>
           </motion.div>
@@ -394,7 +399,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
               animate={{ opacity: [0, 1, 1, 0.6] }}
               transition={{ duration: 2, repeat: Infinity }}
             >
-              Planning with Gemini, checking Firecrawl, and updating the cloud context...
+              Planning with Gemini, pulling Firecrawl research, and preparing the cloud workflow...
             </motion.p>
           </motion.div>
         )}
@@ -415,7 +420,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
       />
 
       <CallApprovalSheet
-        proposal={latestReply?.proposedTask ?? null}
+        proposal={latestReply?.callProposal ?? null}
         visible={approvalVisible}
         busy={approvingTask}
         onApprove={handleApproveTask}

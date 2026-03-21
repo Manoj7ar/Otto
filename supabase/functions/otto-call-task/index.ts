@@ -1,5 +1,16 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
+import {
+  authenticateUser,
+  assertCallRuntimeReady,
+  cleanStringArray,
+  cleanText,
+  createApprovedRecord,
+  createServiceClient,
+  executeTaskChain,
+  fetchUserProfileById,
+  HttpError,
+  normalizeCallProposal,
+} from "../_shared/otto-concierge.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,38 +18,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") ?? "";
-const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") ?? "";
-const TWILIO_PHONE_NUMBER = Deno.env.get("TWILIO_PHONE_NUMBER") ?? "";
-const OTTO_WEBHOOK_SECRET = Deno.env.get("OTTO_WEBHOOK_SECRET") ?? "";
-
-interface ProposedTask {
-  taskType: "verification" | "booking";
-  businessName: string;
-  businessPhone: string | null;
-  businessWebsite: string | null;
-  callGoal: string;
-  approvalSummary: string;
-  approvedScope: string[];
-  questions: string[];
-}
-
 interface CreateTaskRequest {
   query?: string;
   subject?: string;
-  proposal?: ProposedTask;
-}
-
-class HttpError extends Error {
-  status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
+  callProposal?: unknown;
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -48,129 +31,6 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function cleanText(value: unknown, fallback = "") {
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
-}
-
-function cleanStringArray(value: unknown, limit = 6): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .slice(0, limit);
-}
-
-function normalizeProposal(raw: unknown): ProposedTask | null {
-  const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : null;
-
-  if (!data) {
-    return null;
-  }
-
-  const taskType = data.taskType === "verification" || data.taskType === "booking" ? data.taskType : null;
-  const businessName = cleanText(data.businessName);
-  const callGoal = cleanText(data.callGoal);
-  const approvalSummary = cleanText(data.approvalSummary);
-
-  if (!taskType || !businessName || !callGoal || !approvalSummary) {
-    return null;
-  }
-
-  return {
-    taskType,
-    businessName,
-    businessPhone: cleanText(data.businessPhone) || null,
-    businessWebsite: cleanText(data.businessWebsite) || null,
-    callGoal,
-    approvalSummary,
-    approvedScope: cleanStringArray(data.approvedScope),
-    questions: cleanStringArray(data.questions, 5),
-  };
-}
-
-function createServiceClient() {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw new HttpError(500, "Supabase service role is not configured.");
-  }
-
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-}
-
-async function authenticateUser(req: Request) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    throw new HttpError(500, "Supabase environment is not configured.");
-  }
-
-  const authHeader = req.headers.get("Authorization");
-
-  if (!authHeader) {
-    throw new HttpError(401, "Authentication required.");
-  }
-
-  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: {
-      headers: {
-        Authorization: authHeader,
-      },
-    },
-  });
-
-  const {
-    data: { user },
-    error,
-  } = await client.auth.getUser();
-
-  if (error || !user) {
-    throw new HttpError(401, "Invalid session.");
-  }
-
-  return user;
-}
-
-async function getProfile(serviceClient: ReturnType<typeof createServiceClient>, userId: string) {
-  const { data, error } = await serviceClient
-    .from("profiles")
-    .select("callback_phone, call_briefing_enabled, onboarding_completed_at")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (error) {
-    throw new HttpError(500, "Failed to load profile.");
-  }
-
-  if (!data?.onboarding_completed_at) {
-    throw new HttpError(403, "Complete onboarding before creating tasks.");
-  }
-
-  return data;
-}
-
-async function createTwilioCall(taskId: string) {
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER || !OTTO_WEBHOOK_SECRET) {
-    throw new HttpError(500, "Twilio call environment is not configured.");
-  }
-
-  const webhookBase = `${SUPABASE_URL}/functions/v1/otto-call-webhook`;
-  const params = new URLSearchParams({
-    Url: `${webhookBase}?taskId=${encodeURIComponent(taskId)}&token=${encodeURIComponent(OTTO_WEBHOOK_SECRET)}&step=intro`,
-    StatusCallback: `${webhookBase}?taskId=${encodeURIComponent(taskId)}&token=${encodeURIComponent(OTTO_WEBHOOK_SECRET)}&step=status`,
-    StatusCallbackMethod: "POST",
-    From: TWILIO_PHONE_NUMBER,
-    To: "",
-    Record: "true",
-  });
-  params.append("StatusCallbackEvent", "initiated");
-  params.append("StatusCallbackEvent", "ringing");
-  params.append("StatusCallbackEvent", "answered");
-  params.append("StatusCallbackEvent", "completed");
-
-  return params;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -178,86 +38,138 @@ serve(async (req) => {
 
   try {
     const user = await authenticateUser(req);
-    const { query = "", subject = "", proposal: rawProposal }: CreateTaskRequest = await req.json();
-    const proposal = normalizeProposal(rawProposal);
+    assertCallRuntimeReady();
+    const profile = await fetchUserProfileById(user.id);
+    const { query = "", subject = "", callProposal }: CreateTaskRequest = await req.json();
+    const proposal = normalizeCallProposal(callProposal);
 
     if (!proposal) {
-      throw new HttpError(400, "A valid proposed task is required.");
+      throw new HttpError(400, "A valid call proposal is required.");
     }
 
-    if (!proposal.businessPhone) {
-      throw new HttpError(400, "Otto could not verify a phone number for this task.");
+    if (!profile.callback_phone) {
+      throw new HttpError(400, "Add a callback phone number in your profile before starting cloud calls.");
     }
 
     const serviceClient = createServiceClient();
-    const profile = await getProfile(serviceClient, user.id);
-
+    const approvedScope = cleanStringArray(
+      [
+        proposal.callReason,
+        ...proposal.callQuestions,
+        ...proposal.followUpActions.map((action) =>
+          action === "callback_user" ? "Call the user back with the result." : "Send the user an email update."
+        ),
+      ],
+      12,
+    );
     const { data: task, error: insertError } = await serviceClient
       .from("otto_tasks")
       .insert({
         user_id: user.id,
         status: "queued",
-        task_type: proposal.taskType,
-        subject: cleanText(subject, proposal.businessName),
-        business_name: proposal.businessName,
-        business_phone: proposal.businessPhone,
-        business_website: proposal.businessWebsite,
-        call_goal: proposal.callGoal,
-        approval_summary: proposal.approvalSummary,
-        approved_scope: proposal.approvedScope,
-        request_query: cleanText(query, proposal.callGoal),
-        source_snapshot: [],
+        task_type: proposal.callType,
+        title: proposal.title,
+        subject: cleanText(subject, proposal.callTargetName),
+        business_name: proposal.callTargetName,
+        business_phone: proposal.callTargetPhone,
+        business_website: proposal.firecrawlEvidence[0]?.url ?? null,
+        call_goal: proposal.callReason,
+        approval_summary: proposal.summary,
+        approved_scope: approvedScope,
+        request_query: cleanText(query, proposal.summary),
+        source_snapshot: proposal.firecrawlEvidence,
         conversation_log: [],
         metadata: {
-          questions: proposal.questions,
+          callQuestions: proposal.callQuestions,
+          callReason: proposal.callReason,
+          followUpActions: proposal.followUpActions,
           callbackPhone: profile.callback_phone,
-          callbackEnabled: profile.call_briefing_enabled,
-          introTurns: 0,
+          callTargetEmail: proposal.callTargetEmail,
         },
+        inbox_state: "active",
+        latest_summary: proposal.summary,
+        latest_step_label: "Calling the business",
       })
-      .select("id, business_phone")
+      .select("id")
       .single();
 
     if (insertError || !task) {
       throw new HttpError(500, "Could not create the cloud call task.");
     }
 
-    const params = await createTwilioCall(task.id);
-    params.set("To", task.business_phone ?? proposal.businessPhone ?? "");
-
-    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json`, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-        "Content-Type": "application/x-www-form-urlencoded",
+    const steps = [
+      {
+        task_id: task.id,
+        user_id: user.id,
+        step_order: 0,
+        step_type: "call_business",
+        title: `Call ${proposal.callTargetName}`,
+        status: "approved",
+        approval_required: true,
+        approval_summary: proposal.summary,
+        recipient_name: proposal.callTargetName,
+        recipient_email: proposal.callTargetEmail,
+        recipient_phone: proposal.callTargetPhone,
+        email_subject: null,
+        email_body: null,
+        payload: {
+          callReason: proposal.callReason,
+          questions: proposal.callQuestions,
+          firecrawlEvidence: proposal.firecrawlEvidence,
+        },
       },
-      body: params.toString(),
-    });
+      ...(proposal.followUpActions.includes("send_user_email")
+        ? [{
+          task_id: task.id,
+          user_id: user.id,
+          step_order: 1,
+          step_type: "send_user_email",
+          title: "Send you an email update",
+          status: "pending",
+          approval_required: false,
+          approval_summary: "Send an email summary after the call finishes.",
+          recipient_name: profile.full_name,
+          recipient_email: null,
+          recipient_phone: null,
+          email_subject: null,
+          email_body: null,
+          payload: {},
+        }]
+        : []),
+      {
+        task_id: task.id,
+        user_id: user.id,
+        step_order: proposal.followUpActions.includes("send_user_email") ? 2 : 1,
+        step_type: "callback_user",
+        title: "Call you back with the result",
+        status: "pending",
+        approval_required: false,
+        approval_summary: "Place a callback briefing after the task finishes.",
+        recipient_name: profile.full_name,
+        recipient_email: null,
+        recipient_phone: profile.callback_phone,
+        email_subject: null,
+        email_body: null,
+        payload: {},
+      },
+    ];
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("twilio_call_create_error", errorText);
+    const { data: insertedSteps, error: stepError } = await serviceClient
+      .from("otto_task_steps")
+      .insert(steps)
+      .select("id, step_order, title");
 
-      await serviceClient
-        .from("otto_tasks")
-        .update({
-          status: "failed",
-          result_summary: "Twilio could not start the business call.",
-        })
-        .eq("id", task.id);
-
-      throw new HttpError(502, "Twilio could not start the business call.");
+    if (stepError || !insertedSteps || insertedSteps.length === 0) {
+      throw new HttpError(500, "Could not create the call task steps.");
     }
 
-    const callData = await response.json();
+    const firstInsertedStep = insertedSteps.find((step) => step.step_order === 0) ?? insertedSteps[0];
 
-    await serviceClient
-      .from("otto_tasks")
-      .update({
-        status: "dialing",
-        twilio_call_sid: cleanText(callData.sid),
-      })
-      .eq("id", task.id);
+    if (firstInsertedStep) {
+      await createApprovedRecord(task.id, firstInsertedStep.id, user.id, proposal.summary);
+    }
+
+    await executeTaskChain(task.id);
 
     return jsonResponse({
       success: true,
