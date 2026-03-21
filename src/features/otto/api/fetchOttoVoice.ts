@@ -1,6 +1,7 @@
 import { supabase } from "@/shared/supabase/client";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 export async function fetchOttoVoice(text: string, mode: "app" | "call" | "callback" = "app") {
   const {
@@ -10,15 +11,20 @@ export async function fetchOttoVoice(text: string, mode: "app" | "call" | "callb
   const response = await fetch(`${supabaseUrl}/functions/v1/otto-voice`, {
     method: "POST",
     headers: {
-      apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      apikey: supabasePublishableKey,
       "Content-Type": "application/json",
       ...(session?.access_token ? { "x-otto-auth": `Bearer ${session.access_token}` } : {}),
     },
-    body: JSON.stringify({ text, mode }),
+    body: JSON.stringify({
+      text,
+      mode,
+      accessToken: session?.access_token ?? null,
+    }),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to generate voice audio.");
+    const message = await response.text().catch(() => "");
+    throw new Error(message || "Failed to generate voice audio.");
   }
 
   return response.blob();

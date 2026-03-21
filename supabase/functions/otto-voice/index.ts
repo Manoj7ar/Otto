@@ -18,6 +18,12 @@ const ELEVENLABS_CALLBACK_VOICE_ID = Deno.env.get("ELEVENLABS_CALLBACK_VOICE_ID"
 
 type VoiceMode = "app" | "call" | "callback";
 
+interface VoiceRequestBody {
+  text?: unknown;
+  mode?: unknown;
+  accessToken?: unknown;
+}
+
 class HttpError extends Error {
   status: number;
 
@@ -39,12 +45,18 @@ function pickVoiceId(mode: VoiceMode) {
   return ELEVENLABS_APP_VOICE_ID;
 }
 
-async function requireAuth(req: Request) {
+function normalizeBearerToken(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+
+  return value.startsWith("Bearer ") ? value : `Bearer ${value}`;
+}
+
+async function requireAuth(authHeader: string | null) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     throw new HttpError(500, "Supabase environment is not configured.");
   }
-
-  const authHeader = req.headers.get("x-otto-auth") ?? req.headers.get("Authorization");
 
   if (!authHeader) {
     throw new HttpError(401, "Authentication required.");
@@ -124,8 +136,11 @@ serve(async (req) => {
       const requestedMode = url.searchParams.get("mode");
       mode = requestedMode === "call" || requestedMode === "callback" ? requestedMode : "app";
     } else {
-      await requireAuth(req);
-      const body = await req.json();
+      const body = await req.json() as VoiceRequestBody;
+      const authHeader = normalizeBearerToken(
+        req.headers.get("x-otto-auth") ?? req.headers.get("Authorization") ?? body.accessToken,
+      );
+      await requireAuth(authHeader);
       text = typeof body?.text === "string" ? body.text.trim() : "";
       const requestedMode = body?.mode;
       mode = requestedMode === "call" || requestedMode === "callback" ? requestedMode : "app";
