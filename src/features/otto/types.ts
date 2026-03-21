@@ -11,21 +11,6 @@ export interface OttoAction {
   type: "source" | "search" | "directions";
 }
 
-export type OttoFollowUpAction = "callback_user";
-
-export interface OttoCallProposal {
-  callType: "verification" | "booking";
-  title: string;
-  summary: string;
-  callReason: string;
-  callTargetName: string;
-  callTargetPhone: string;
-  callTargetEmail: string | null;
-  firecrawlEvidence: OttoSource[];
-  callQuestions: string[];
-  followUpActions: OttoFollowUpAction[];
-}
-
 export interface StructuredDetail {
   label: string;
   value: string;
@@ -44,7 +29,6 @@ export interface OttoReplyData {
   actions: OttoAction[];
   sources: OttoSource[];
   structuredDetails: StructuredDetail[];
-  callProposal: OttoCallProposal | null;
 }
 
 export interface OttoUserTurn {

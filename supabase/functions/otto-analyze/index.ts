@@ -1,5 +1,4 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,34 +7,15 @@ const corsHeaders = {
 };
 
 const MAX_SESSION_TURNS = 8;
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GOOGLE_API_KEY");
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
-const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
 
 type ConfidenceLevel = "low" | "medium" | "high";
 type SearchMode = "none" | "search";
 type ActionType = "source" | "search" | "directions";
-type IntentKind = "answer" | "call_verification" | "call_booking";
-type FollowUpAction = "callback_user";
 
 interface AnalyzeRequest {
   query?: string;
   imageBase64?: string;
   sessionContext?: unknown;
-}
-
-interface ProfileRow {
-  full_name: string | null;
-  home_location: string;
-  current_region: string;
-  language_code: string;
-  timezone: string;
-  travel_mode: string;
-  callback_phone: string | null;
-  call_briefing_enabled: boolean;
-  onboarding_completed_at: string | null;
 }
 
 interface Interpretation {
@@ -48,8 +28,6 @@ interface Interpretation {
   searchMode: SearchMode;
   searchQuery: string;
   detailHints: string[];
-  intentKind: IntentKind;
-  targetBusinessHint: string;
 }
 
 interface SearchSource {
@@ -71,24 +49,6 @@ interface OttoAction {
   type: ActionType;
 }
 
-interface OttoCallProposal {
-  callType: "verification" | "booking";
-  title: string;
-  summary: string;
-  callReason: string;
-  callTargetName: string;
-  callTargetPhone: string;
-  callTargetEmail: string | null;
-  firecrawlEvidence: Array<{
-    title: string;
-    url: string;
-    snippet: string;
-    sourceType: string;
-  }>;
-  callQuestions: string[];
-  followUpActions: FollowUpAction[];
-}
-
 interface OttoReply {
   messageId: string;
   createdAt: string;
@@ -107,7 +67,6 @@ interface OttoReply {
     sourceType: string;
   }>;
   structuredDetails: StructuredDetail[];
-  callProposal: OttoCallProposal | null;
 }
 
 interface OttoUserTurn {
@@ -153,6 +112,10 @@ class HttpError extends Error {
   }
 }
 
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GOOGLE_API_KEY");
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
+
 const interpretationSchema = {
   type: "OBJECT",
   properties: {
@@ -168,8 +131,6 @@ const interpretationSchema = {
       type: "ARRAY",
       items: { type: "STRING" },
     },
-    intentKind: { type: "STRING", enum: ["answer", "call_verification", "call_booking"] },
-    targetBusinessHint: { type: "STRING" },
   },
   required: [
     "subject",
@@ -181,8 +142,6 @@ const interpretationSchema = {
     "searchMode",
     "searchQuery",
     "detailHints",
-    "intentKind",
-    "targetBusinessHint",
   ],
 };
 
@@ -206,37 +165,6 @@ const synthesisSchema = {
       items: { type: "STRING" },
     },
     sessionSummary: { type: "STRING" },
-    callProposal: {
-      type: "OBJECT",
-      properties: {
-        callType: { type: "STRING", enum: ["verification", "booking"] },
-        title: { type: "STRING" },
-        summary: { type: "STRING" },
-        callReason: { type: "STRING" },
-        callTargetName: { type: "STRING" },
-        callTargetPhone: { type: "STRING" },
-        callTargetEmail: { type: "STRING" },
-        callQuestions: {
-          type: "ARRAY",
-          items: { type: "STRING" },
-        },
-        followUpActions: {
-          type: "ARRAY",
-          items: { type: "STRING", enum: ["callback_user"] },
-        },
-      },
-      required: [
-        "callType",
-        "title",
-        "summary",
-        "callReason",
-        "callTargetName",
-        "callTargetPhone",
-        "callTargetEmail",
-        "callQuestions",
-        "followUpActions",
-      ],
-    },
   },
   required: ["answer", "structuredDetails", "suggestedFollowUps", "sessionSummary"],
 };
@@ -276,70 +204,13 @@ function cleanBase64Image(imageBase64: string): string {
   return imageBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "").trim();
 }
 
-function normalizePhone(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const normalized = value.replace(/[^\d+]/g, "");
-  return normalized.length >= 7 ? normalized : null;
-}
-
 function shouldForceWebSearch(query: string) {
-  return /(review|rating|hours|open|closed|menu|price|website|address|directions|buy|compare|history|book|reserve|availability|phone|call)/i
+  return /(review|rating|hours|open|closed|menu|price|website|address|directions|buy|compare|history|book|reserve|availability)/i
     .test(query);
 }
 
 function generateId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
-}
-
-function normalizeCallProposal(raw: unknown, sources: SearchSource[], profile: ProfileRow): OttoCallProposal | null {
-  const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : null;
-
-  if (!data || sources.length === 0) {
-    return null;
-  }
-
-  const callType =
-    data.callType === "verification" || data.callType === "booking"
-      ? data.callType
-      : null;
-  const title = cleanText(data.title);
-  const summary = cleanText(data.summary);
-  const callReason = cleanText(data.callReason);
-  const callTargetName = cleanText(data.callTargetName);
-  const callTargetPhone = normalizePhone(cleanText(data.callTargetPhone));
-  const requestedFollowUps = cleanStringArray(data.followUpActions, 3)
-    .filter((entry): entry is FollowUpAction => entry === "callback_user");
-  const followUpActions = Array.from(
-    new Set<FollowUpAction>([
-      profile.callback_phone ? "callback_user" : requestedFollowUps[0] ?? "callback_user",
-      ...requestedFollowUps,
-    ]),
-  );
-
-  if (!callType || !title || !summary || !callReason || !callTargetName || !callTargetPhone) {
-    return null;
-  }
-
-  return {
-    callType,
-    title,
-    summary,
-    callReason,
-    callTargetName,
-    callTargetPhone,
-    callTargetEmail: cleanText(data.callTargetEmail) || null,
-    firecrawlEvidence: sources.slice(0, 3).map(({ title, url, snippet, sourceType }) => ({
-      title,
-      url,
-      snippet,
-      sourceType,
-    })),
-    callQuestions: cleanStringArray(data.callQuestions, 6),
-    followUpActions,
-  };
 }
 
 function normalizeReply(raw: unknown): OttoReply | null {
@@ -423,7 +294,6 @@ function normalizeReply(raw: unknown): OttoReply | null {
     actions,
     sources,
     structuredDetails,
-    callProposal: data.callProposal as OttoCallProposal | null,
   };
 }
 
@@ -491,18 +361,6 @@ function formatTurnHistory(turns: OttoConversationTurn[]) {
     .join("\n");
 }
 
-function buildProfileContext(profile: ProfileRow) {
-  return {
-    homeLocation: profile.home_location,
-    currentRegion: profile.current_region,
-    languageCode: profile.language_code,
-    timezone: profile.timezone,
-    travelMode: profile.travel_mode,
-    callbackPhone: profile.callback_phone,
-    callBriefingEnabled: true,
-  };
-}
-
 function normalizeInterpretation(
   raw: unknown,
   fallbackQuery: string,
@@ -529,9 +387,6 @@ function normalizeInterpretation(
       : needsWebSearch
         ? "search"
         : "none";
-  const intentKind = data.intentKind === "call_verification" || data.intentKind === "call_booking"
-    ? data.intentKind
-    : "answer";
 
   return {
     subject: cleanText(data.subject, fallbackSubject),
@@ -546,8 +401,6 @@ function normalizeInterpretation(
     searchMode,
     searchQuery,
     detailHints: cleanStringArray(data.detailHints),
-    intentKind,
-    targetBusinessHint: cleanText(data.targetBusinessHint),
   };
 }
 
@@ -591,55 +444,24 @@ function buildSearchPlanQuery(
   interpretation: Interpretation,
   query: string,
   sessionContext: OttoSessionContext,
-  profile: ProfileRow,
 ) {
-  const regionHint = [profile.current_region, profile.home_location].filter(Boolean).join(" ");
-
   if (interpretation.searchQuery) {
-    return `${interpretation.searchQuery} ${regionHint}`.trim();
+    return interpretation.searchQuery;
   }
 
   if (sessionContext.activeSubject && query) {
-    return `${sessionContext.activeSubject} ${query} ${regionHint}`.trim();
+    return `${sessionContext.activeSubject} ${query}`;
   }
 
   if (query) {
-    return `${query} ${regionHint}`.trim();
+    return query;
   }
 
   if (sessionContext.activeSubject) {
-    return `${sessionContext.activeSubject} ${regionHint}`.trim();
+    return sessionContext.activeSubject;
   }
 
-  return `${interpretation.subject} ${regionHint}`.trim();
-}
-
-function dedupeSources(sources: SearchSource[]) {
-  const seen = new Set<string>();
-
-  return sources.filter((source) => {
-    if (seen.has(source.url)) {
-      return false;
-    }
-
-    seen.add(source.url);
-    return true;
-  });
-}
-
-function buildFirecrawlQueries(
-  interpretation: Interpretation,
-  searchQuery: string,
-  profile: ProfileRow,
-) {
-  const queries = [searchQuery];
-
-  if (interpretation.intentKind !== "answer") {
-    queries.push(`${interpretation.targetBusinessHint || interpretation.subject} phone contact ${profile.current_region}`.trim());
-    queries.push(`${interpretation.targetBusinessHint || interpretation.subject} official site phone ${profile.current_region}`.trim());
-  }
-
-  return Array.from(new Set(queries.filter(Boolean))).slice(0, 3);
+  return interpretation.subject;
 }
 
 function buildSourceActions(subject: string, searchQuery: string, sources: SearchSource[]): OttoAction[] {
@@ -672,25 +494,6 @@ function buildSourceActions(subject: string, searchQuery: string, sources: Searc
   return actions.slice(0, 3);
 }
 
-function ensureCallPrompt(answer: string, proposal: OttoCallProposal | null) {
-  if (!proposal) {
-    return answer;
-  }
-
-  return /do you want me to make this call\?/i.test(answer)
-    ? answer
-    : `${answer} Do you want me to make this call?`;
-}
-
-function isSimpleGreeting(query: string, usedVision: boolean) {
-  if (usedVision) {
-    return false;
-  }
-
-  const normalized = query.trim().toLowerCase();
-  return /^(hi|hello|hey|yo|hiya|good morning|good afternoon|good evening)$/.test(normalized);
-}
-
 function normalizeSynthesis(
   raw: unknown,
   interpretation: Interpretation,
@@ -699,22 +502,20 @@ function normalizeSynthesis(
   usedWebSearch: boolean,
   sources: SearchSource[],
   sessionContext: OttoSessionContext,
-  profile: ProfileRow,
 ): { reply: OttoReply; sessionSummary: string } {
   const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
   const createdAt = new Date().toISOString();
   const messageId = generateId("msg");
-  const callProposal = normalizeCallProposal(data.callProposal, sources, profile);
-  const answer = ensureCallPrompt(cleanText(
+  const answer = cleanText(
     data.answer,
-    callProposal
-      ? `I found enough Firecrawl evidence to call ${callProposal.callTargetName} and verify this for you.`
-      : usedWebSearch
-        ? "I found relevant information, but I could not confidently summarize it. Try narrowing the question."
-        : "I could interpret the scene, but I could not confidently produce a full answer. Try a more specific follow-up."
-  ), callProposal);
+    usedWebSearch
+      ? "I found relevant information, but I could not confidently summarize it. Try narrowing the question."
+      : "I could interpret the scene, but I could not confidently produce a full answer. Try a more specific follow-up."
+  );
 
-  const cleanedStructuredDetails = (Array.isArray(data.structuredDetails) ? data.structuredDetails : [])
+  const structuredDetails = (
+    Array.isArray(data.structuredDetails) ? data.structuredDetails : []
+  )
     .map((entry) => {
       const row = typeof entry === "object" && entry !== null ? entry as Record<string, unknown> : {};
       const label = cleanText(row.label);
@@ -729,22 +530,17 @@ function normalizeSynthesis(
     .filter((entry): entry is StructuredDetail => Boolean(entry))
     .slice(0, 6);
 
-  if (cleanedStructuredDetails.length === 0 && interpretation.visualDescription) {
-    cleanedStructuredDetails.push({
+  if (structuredDetails.length === 0 && interpretation.visualDescription) {
+    structuredDetails.push({
       label: usedVision ? "What Otto saw" : "Session context",
       value: usedVision ? interpretation.visualDescription : sessionContext.summary || query || interpretation.userIntent,
     });
   }
 
-  cleanedStructuredDetails.push({
-    label: "Profile context",
-    value: `${profile.current_region} | ${profile.travel_mode} | ${profile.timezone}`,
-  });
-
   if (sources.length > 0) {
-    cleanedStructuredDetails.push({
-      label: "Firecrawl research",
-      value: `Checked ${sources.length} Firecrawl source${sources.length === 1 ? "" : "s"} to verify the details.`,
+    structuredDetails.push({
+      label: "Web verification",
+      value: `Checked ${sources.length} source${sources.length === 1 ? "" : "s"} for supporting details.`,
     });
   }
 
@@ -766,7 +562,7 @@ function normalizeSynthesis(
       suggestedFollowUps: cleanStringArray(data.suggestedFollowUps, 4),
       actions: buildSourceActions(
         interpretation.subject,
-        buildSearchPlanQuery(interpretation, query, sessionContext, profile),
+        buildSearchPlanQuery(interpretation, query, sessionContext),
         sources,
       ),
       sources: sources.map(({ title, url, snippet, sourceType }) => ({
@@ -775,8 +571,7 @@ function normalizeSynthesis(
         snippet,
         sourceType,
       })),
-      structuredDetails: cleanedStructuredDetails.slice(0, 6),
-      callProposal,
+      structuredDetails: structuredDetails.slice(0, 6),
     },
     sessionSummary,
   };
@@ -814,56 +609,6 @@ function buildUpdatedSessionContext(
     activeSubjectType: reply.subjectType || sessionContext.activeSubjectType,
     summary: sessionSummary,
     turns: [...sessionContext.turns, userTurn, assistantTurn].slice(-MAX_SESSION_TURNS),
-  };
-}
-
-function buildGreetingResponse(
-  query: string,
-  sessionContext: OttoSessionContext,
-  profile: ProfileRow,
-): OttoTurnResponse {
-  const createdAt = new Date().toISOString();
-  const greetingText = `Hello ${profile.full_name || "there"}. I'm ready. You can ask about what you're looking at, or I can use Firecrawl research and make a cloud call if needed.`;
-  const reply: OttoReply = {
-    messageId: generateId("msg"),
-    createdAt,
-    subject: "Otto",
-    subjectType: "assistant",
-    answer: `Hello ${profile.full_name || "there"}. I’m ready. You can ask about what you’re looking at, or I can use Firecrawl research and make a cloud call if needed.`,
-    confidence: "high",
-    usedVision: false,
-    usedWebSearch: false,
-    suggestedFollowUps: [
-      "What am I looking at?",
-      "Can you verify this by calling?",
-      "Find more information about this",
-    ],
-    actions: [],
-    sources: [],
-    structuredDetails: [
-      {
-        label: "Ready",
-        value: "Otto is online and waiting for your next question.",
-      },
-      {
-        label: "Cloud workflow",
-        value: "If a live call would help, Otto can run it in the cloud and call you back with the result.",
-      },
-    ],
-    callProposal: null,
-  };
-  reply.answer = greetingText;
-
-  return {
-    reply,
-    sessionContext: buildUpdatedSessionContext(
-      sessionContext,
-      query,
-      false,
-      reply,
-      "The user greeted Otto and Otto is ready for the next task.",
-    ),
-    sessionStatus: "active",
   };
 }
 
@@ -994,63 +739,6 @@ async function searchWithFirecrawl(query: string): Promise<SearchSource[]> {
   }
 }
 
-async function researchWithFirecrawl(
-  interpretation: Interpretation,
-  searchQuery: string,
-  profile: ProfileRow,
-) {
-  const queries = buildFirecrawlQueries(interpretation, searchQuery, profile);
-  const results = await Promise.all(queries.map((query) => searchWithFirecrawl(query)));
-  return dedupeSources(results.flat()).slice(0, 6);
-}
-
-async function getAuthenticatedProfile(req: Request): Promise<ProfileRow> {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    throw new HttpError(500, "Supabase environment is not configured.");
-  }
-
-  const authHeader = req.headers.get("Authorization");
-
-  if (!authHeader) {
-    throw new HttpError(401, "Authentication required.");
-  }
-
-  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: {
-      headers: {
-        Authorization: authHeader,
-      },
-    },
-  });
-
-  const {
-    data: { user },
-    error: authError,
-  } = await client.auth.getUser();
-
-  if (authError || !user) {
-    throw new HttpError(401, "Invalid session.");
-  }
-
-  const { data: profile, error: profileError } = await client
-    .from("profiles")
-    .select(
-      "full_name, home_location, current_region, language_code, timezone, travel_mode, callback_phone, call_briefing_enabled, onboarding_completed_at",
-    )
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profileError) {
-    throw new HttpError(500, "Failed to load profile.");
-  }
-
-  if (!profile?.onboarding_completed_at) {
-    throw new HttpError(403, "Complete onboarding before using Otto.");
-  }
-
-  return profile as ProfileRow;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -1059,7 +747,6 @@ serve(async (req) => {
   const startedAt = performance.now();
 
   try {
-    const profile = await getAuthenticatedProfile(req);
     const { query = "", imageBase64, sessionContext: rawSessionContext }: AnalyzeRequest = await req.json();
     const trimmedQuery = query.trim();
     const cleanedImage = imageBase64 ? cleanBase64Image(imageBase64) : "";
@@ -1070,22 +757,15 @@ serve(async (req) => {
       return jsonResponse({ error: "Query or image is required" }, 400);
     }
 
-    if (isSimpleGreeting(trimmedQuery, usedVision)) {
-      return jsonResponse({
-        success: true,
-        data: buildGreetingResponse(trimmedQuery, sessionContext, profile),
-      });
-    }
-
     const identifyStartedAt = performance.now();
     const interpretation = normalizeInterpretation(
       await callGemini<Interpretation>(
         [
-          "You are Otto, a mobile AI walking companion and cloud call planner.",
-          "Interpret the current user turn using the current frame when available, plus session memory and the user's stored profile context.",
-          "Use call_verification or call_booking when a live call would materially improve the outcome over research alone.",
-          "Firecrawl is the only retrieval layer. There is no browser automation.",
-          "Choose web retrieval when external, fresh, contact, or verification information is needed.",
+          "You are Otto, a mobile AI walking companion.",
+          "Interpret the current user turn using the current frame when available, plus the session context.",
+          "If the user asks a follow-up like hours, reviews, price, or directions, resolve it against the active session subject when possible.",
+          "Choose web retrieval only when external or fresh information is needed.",
+          "If the session already identifies the place or object, use that instead of inventing a new subject.",
           "Keep subjectType short and human-readable.",
         ].join("\n"),
         [
@@ -1100,7 +780,6 @@ serve(async (req) => {
           {
             text: JSON.stringify({
               currentQuery: trimmedQuery || "Interpret what I am looking at and continue the walk session.",
-              profile: buildProfileContext(profile),
               session: {
                 sessionId: sessionContext.sessionId,
                 activeSubject: sessionContext.activeSubject,
@@ -1117,7 +796,7 @@ serve(async (req) => {
           },
         ],
         interpretationSchema,
-        1600,
+        1400,
       ),
       trimmedQuery,
       usedVision,
@@ -1125,11 +804,9 @@ serve(async (req) => {
     );
 
     const searchStartedAt = performance.now();
-    const searchQuery = buildSearchPlanQuery(interpretation, trimmedQuery, sessionContext, profile);
-    const shouldSearch =
-      interpretation.searchMode === "search" &&
-      (interpretation.needsWebSearch || interpretation.intentKind !== "answer");
-    const sources = shouldSearch ? await researchWithFirecrawl(interpretation, searchQuery, profile) : [];
+    const searchQuery = buildSearchPlanQuery(interpretation, trimmedQuery, sessionContext);
+    const shouldSearch = interpretation.searchMode === "search" && interpretation.needsWebSearch;
+    const sources = shouldSearch ? await searchWithFirecrawl(searchQuery) : [];
     const usedWebSearch = sources.length > 0;
 
     const synthesisStartedAt = performance.now();
@@ -1139,16 +816,13 @@ serve(async (req) => {
         structuredDetails: StructuredDetail[];
         suggestedFollowUps: string[];
         sessionSummary: string;
-        callProposal?: OttoCallProposal;
       }>(
         [
-          "You are Otto, a concise walking companion and cloud call planner.",
-          "Answer the current turn using the current frame, session memory, user profile defaults, and Firecrawl evidence.",
-          "If a call would help more than research alone, return a callProposal with the target, phone number, exact reason, and question list.",
-          "Only return callProposal when the phone number is plausible from Firecrawl-backed evidence.",
-          "followUpActions must only contain callback_user.",
-          "There is no browser automation.",
-          "Do not invent hours, prices, ratings, names, URLs, or phone numbers.",
+          "You are Otto, a concise walking companion.",
+          "Answer the current turn using the current frame, session memory, and any retrieved web evidence.",
+          "Be direct and useful.",
+          "Do not claim web verification when sources are missing.",
+          "Do not invent hours, prices, ratings, names, or URLs.",
           "Session summary should be a short memory string that helps the next follow-up resolve correctly.",
         ].join("\n"),
         [
@@ -1156,13 +830,12 @@ serve(async (req) => {
             text: JSON.stringify({
               currentQuery: trimmedQuery,
               interpretation,
-              profile: buildProfileContext(profile),
               session: {
                 activeSubject: sessionContext.activeSubject,
                 summary: sessionContext.summary,
                 recentTurns: formatTurnHistory(sessionContext.turns),
               },
-              firecrawlSources: sources.map((source, index) => ({
+              sources: sources.map((source, index) => ({
                 id: index + 1,
                 title: source.title,
                 url: source.url,
@@ -1173,7 +846,7 @@ serve(async (req) => {
           },
         ],
         synthesisSchema,
-        2200,
+        1800,
       ),
       interpretation,
       trimmedQuery,
@@ -1181,7 +854,6 @@ serve(async (req) => {
       usedWebSearch,
       sources,
       sessionContext,
-      profile,
     );
 
     const updatedSessionContext = buildUpdatedSessionContext(
@@ -1201,7 +873,6 @@ serve(async (req) => {
       turnCount: updatedSessionContext.turns.length,
       usedVision,
       usedWebSearch,
-      intentKind: interpretation.intentKind,
       searchQuery,
     });
 

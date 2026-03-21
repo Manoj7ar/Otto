@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 interface BrowserSpeechRecognitionResult {
   isFinal: boolean;
@@ -34,7 +34,6 @@ interface BrowserSpeechRecognitionWindow {
 
 interface SpeechRecognitionHook {
   isListening: boolean;
-  isLiveMode: boolean;
   transcript: string;
   startListening: () => void;
   stopListening: () => void;
@@ -42,28 +41,11 @@ interface SpeechRecognitionHook {
   isSupported: boolean;
 }
 
-interface UseSpeechRecognitionOptions {
-  onSilence?: (transcript: string) => void;
-  silenceMs?: number;
-  paused?: boolean;
-}
-
-export function useSpeechRecognition({
-  onSilence,
-  silenceMs = 1600,
-  paused = false,
-}: UseSpeechRecognitionOptions = {}): SpeechRecognitionHook {
+export function useSpeechRecognition(): SpeechRecognitionHook {
   const [isListening, setIsListening] = useState(false);
-  const [isLiveMode, setIsLiveMode] = useState(false);
   const [transcript, setTranscript] = useState("");
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const finalTranscriptRef = useRef("");
-  const transcriptRef = useRef("");
-  const liveModeRef = useRef(false);
-  const pausedRef = useRef(paused);
-  const silenceTimerRef = useRef<number | null>(null);
-  const restartTimerRef = useRef<number | null>(null);
-  const onSilenceRef = useRef(onSilence);
 
   const SpeechRecognition =
     typeof window !== "undefined"
@@ -73,59 +55,8 @@ export function useSpeechRecognition({
 
   const isSupported = Boolean(SpeechRecognition);
 
-  const clearSilenceTimer = useCallback(() => {
-    if (silenceTimerRef.current !== null) {
-      window.clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
-  }, []);
-
-  const clearRestartTimer = useCallback(() => {
-    if (restartTimerRef.current !== null) {
-      window.clearTimeout(restartTimerRef.current);
-      restartTimerRef.current = null;
-    }
-  }, []);
-
-  const stopRecognitionInstance = useCallback(() => {
-    clearSilenceTimer();
-    clearRestartTimer();
-
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null;
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
-
-    setIsListening(false);
-  }, [clearRestartTimer, clearSilenceTimer]);
-
-  const resetTranscript = useCallback(() => {
-    clearSilenceTimer();
-    finalTranscriptRef.current = "";
-    transcriptRef.current = "";
-    setTranscript("");
-  }, [clearSilenceTimer]);
-
-  const flushTranscript = useCallback(() => {
-    const nextTranscript = transcriptRef.current.trim();
-    const silenceHandler = onSilenceRef.current;
-
-    clearSilenceTimer();
-
-    if (!nextTranscript || pausedRef.current || !silenceHandler) {
-      return;
-    }
-
-    stopRecognitionInstance();
-    finalTranscriptRef.current = "";
-    transcriptRef.current = "";
-    setTranscript("");
-    silenceHandler(nextTranscript);
-  }, [clearSilenceTimer, stopRecognitionInstance]);
-
-  const beginRecognition = useCallback(() => {
-    if (!SpeechRecognition || recognitionRef.current || !liveModeRef.current || pausedRef.current) {
+  const startListening = useCallback(() => {
+    if (!SpeechRecognition || recognitionRef.current) {
       return;
     }
 
@@ -149,46 +80,18 @@ export function useSpeechRecognition({
       }
 
       finalTranscriptRef.current = nextFinalTranscript;
-      transcriptRef.current = [nextFinalTranscript, interimTranscript].filter(Boolean).join(" ").trim();
-      setTranscript(transcriptRef.current);
-
-      if (transcriptRef.current) {
-        clearSilenceTimer();
-        silenceTimerRef.current = window.setTimeout(() => {
-          flushTranscript();
-        }, silenceMs);
-      }
+      setTranscript([nextFinalTranscript, interimTranscript].filter(Boolean).join(" ").trim());
     };
 
     recognition.onerror = (event: BrowserSpeechRecognitionErrorEvent) => {
       console.error("Speech recognition error:", event.error);
-      recognitionRef.current = null;
       setIsListening(false);
-
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        liveModeRef.current = false;
-        setIsLiveMode(false);
-        return;
-      }
-
-      if (liveModeRef.current && !pausedRef.current) {
-        clearRestartTimer();
-        restartTimerRef.current = window.setTimeout(() => {
-          beginRecognition();
-        }, 600);
-      }
+      recognitionRef.current = null;
     };
 
     recognition.onend = () => {
-      recognitionRef.current = null;
       setIsListening(false);
-
-      if (liveModeRef.current && !pausedRef.current) {
-        clearRestartTimer();
-        restartTimerRef.current = window.setTimeout(() => {
-          beginRecognition();
-        }, 300);
-      }
+      recognitionRef.current = null;
     };
 
     recognitionRef.current = recognition;
@@ -201,49 +104,21 @@ export function useSpeechRecognition({
       recognitionRef.current = null;
       setIsListening(false);
     }
-  }, [SpeechRecognition, clearRestartTimer, clearSilenceTimer, flushTranscript, silenceMs]);
-
-  const startListening = useCallback(() => {
-    if (!SpeechRecognition) {
-      return;
-    }
-
-    liveModeRef.current = true;
-    setIsLiveMode(true);
-    beginRecognition();
-  }, [SpeechRecognition, beginRecognition]);
+  }, [SpeechRecognition]);
 
   const stopListening = useCallback(() => {
-    liveModeRef.current = false;
-    setIsLiveMode(false);
-    stopRecognitionInstance();
-    resetTranscript();
-  }, [resetTranscript, stopRecognitionInstance]);
-
-  useEffect(() => {
-    onSilenceRef.current = onSilence;
-  }, [onSilence]);
-
-  useEffect(() => {
-    pausedRef.current = paused;
-
-    if (paused) {
-      stopRecognitionInstance();
-      return;
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
     }
 
-    if (liveModeRef.current) {
-      beginRecognition();
-    }
-  }, [beginRecognition, paused, stopRecognitionInstance]);
+    setIsListening(false);
+  }, []);
 
-  useEffect(() => {
-    return () => {
-      liveModeRef.current = false;
-      stopRecognitionInstance();
-      resetTranscript();
-    };
-  }, [resetTranscript, stopRecognitionInstance]);
+  const resetTranscript = useCallback(() => {
+    finalTranscriptRef.current = "";
+    setTranscript("");
+  }, []);
 
-  return { isListening, isLiveMode, transcript, startListening, stopListening, resetTranscript, isSupported };
+  return { isListening, transcript, startListening, stopListening, resetTranscript, isSupported };
 }

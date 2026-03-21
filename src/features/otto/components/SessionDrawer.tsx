@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ExternalLink, Eye, Globe, Mic2, MicOff, Phone, RotateCcw, Sparkles, Volume2, X } from "lucide-react";
+import { ExternalLink, Eye, Globe, Mic2, MicOff, RotateCcw, Sparkles, Volume2, X } from "lucide-react";
 import type { OttoReplyData, OttoSessionContext } from "../types";
 
 interface SessionDrawerProps {
@@ -13,7 +13,6 @@ interface SessionDrawerProps {
   isSpeaking: boolean;
   onReplay: () => void;
   onToggleMute: () => void;
-  onReviewTaskProposal: () => void;
 }
 
 const confidenceLabel: Record<OttoReplyData["confidence"], string> = {
@@ -46,7 +45,6 @@ export default function SessionDrawer({
   isSpeaking,
   onReplay,
   onToggleMute,
-  onReviewTaskProposal,
 }: SessionDrawerProps) {
   if (sessionContext.turns.length === 0) {
     return null;
@@ -58,7 +56,7 @@ export default function SessionDrawer({
         <>
           <motion.div
             className="fixed inset-0 z-30"
-            style={{ background: "hsl(28 18% 14% / 0.18)" }}
+            style={{ background: "hsl(0 0% 0% / 0.48)" }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -66,12 +64,11 @@ export default function SessionDrawer({
           />
 
           <motion.div
-            className="glass-strong fixed bottom-0 left-0 right-0 z-40 mx-auto max-w-xl rounded-t-[1.75rem] px-4 pb-4 pt-4 sm:rounded-t-[2rem] sm:px-5"
+            className="glass-strong fixed bottom-0 left-0 right-0 z-40 mx-auto max-w-xl rounded-t-[2rem] px-5 pb-10 pt-4"
             style={{
-              maxHeight: "min(82vh, 860px)",
+              maxHeight: "82vh",
               overflowY: "auto",
-              paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
-              boxShadow: "0 -12px 48px hsl(28 28% 42% / 0.14)",
+              boxShadow: "0 -12px 48px hsl(222 60% 3% / 0.6)",
             }}
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
@@ -136,11 +133,11 @@ export default function SessionDrawer({
             )}
 
             {latestReply && canSpeak && (
-              <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+              <div className="mt-4 flex gap-3">
                 <button
                   type="button"
                   onClick={onReplay}
-                  className="glass-button flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm sm:w-auto sm:justify-start sm:py-2"
+                  className="glass-button flex items-center gap-2 rounded-full px-4 py-2 text-sm"
                 >
                   <Volume2 size={14} className={isSpeaking ? "text-primary" : "text-secondary-otto"} />
                   {isSpeaking ? "Speaking..." : "Replay audio"}
@@ -148,7 +145,7 @@ export default function SessionDrawer({
                 <button
                   type="button"
                   onClick={onToggleMute}
-                  className="glass-button flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm sm:w-auto sm:justify-start sm:py-2"
+                  className="glass-button flex items-center gap-2 rounded-full px-4 py-2 text-sm"
                 >
                   {isMuted ? <MicOff size={14} className="text-secondary-otto" /> : <Mic2 size={14} className="text-primary" />}
                   {isMuted ? "Unmute replies" : "Mute replies"}
@@ -210,17 +207,6 @@ export default function SessionDrawer({
                           </span>
                         ))}
                       </div>
-                    )}
-
-                    {isLatestAssistantTurn && turn.reply.callProposal && (
-                      <button
-                        type="button"
-                        onClick={onReviewTaskProposal}
-                        className="glass-button-primary inline-flex w-full items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-medium sm:w-auto"
-                      >
-                        <Phone size={14} />
-                        Review call proposal
-                      </button>
                     )}
 
                     {isLatestAssistantTurn && turn.reply.sources.length > 0 && (
