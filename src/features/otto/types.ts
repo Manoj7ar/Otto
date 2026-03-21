@@ -11,15 +11,19 @@ export interface OttoAction {
   type: "source" | "search" | "directions";
 }
 
-export interface OttoProposedTask {
-  taskType: "verification" | "booking";
-  businessName: string;
-  businessPhone: string | null;
-  businessWebsite: string | null;
-  callGoal: string;
-  approvalSummary: string;
-  approvedScope: string[];
-  questions: string[];
+export type OttoFollowUpAction = "callback_user" | "send_user_email";
+
+export interface OttoCallProposal {
+  callType: "verification" | "booking";
+  title: string;
+  summary: string;
+  callReason: string;
+  callTargetName: string;
+  callTargetPhone: string;
+  callTargetEmail: string | null;
+  firecrawlEvidence: OttoSource[];
+  callQuestions: string[];
+  followUpActions: OttoFollowUpAction[];
 }
 
 export interface StructuredDetail {
@@ -40,7 +44,7 @@ export interface OttoReplyData {
   actions: OttoAction[];
   sources: OttoSource[];
   structuredDetails: StructuredDetail[];
-  proposedTask: OttoProposedTask | null;
+  callProposal: OttoCallProposal | null;
 }
 
 export interface OttoUserTurn {

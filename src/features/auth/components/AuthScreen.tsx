@@ -1,36 +1,56 @@
 import { useState } from "react";
-import { LoaderCircle, Mail, Sparkles } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 
+type AuthMode = "sign_in" | "sign_up";
+
 interface AuthScreenProps {
-  onSendMagicLink: (email: string) => Promise<void>;
+  onSubmit: (mode: AuthMode, email: string, password: string) => Promise<void>;
 }
 
-export default function AuthScreen({ onSendMagicLink }: AuthScreenProps) {
+export default function AuthScreen({ onSubmit }: AuthScreenProps) {
+  const [mode, setMode] = useState<AuthMode>("sign_in");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [sentTo, setSentTo] = useState("");
 
   return (
-    <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden px-4 py-10">
-      <div className="absolute inset-0 opacity-60">
-        <div className="absolute left-[10%] top-[12%] h-40 w-40 rounded-full bg-cyan-400/20 blur-3xl" />
-        <div className="absolute right-[8%] top-[18%] h-48 w-48 rounded-full bg-fuchsia-500/15 blur-3xl" />
-        <div className="absolute bottom-[14%] left-[28%] h-56 w-56 rounded-full bg-blue-600/12 blur-3xl" />
-      </div>
-
-      <div className="glass-strong relative z-10 w-full max-w-md rounded-[2rem] p-7 sm:p-8">
-        <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-300/15 text-primary">
-          <Sparkles size={20} />
-        </div>
-        <p className="mt-6 text-sm uppercase tracking-[0.24em] text-secondary-otto">Otto cloud agent</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Sign in to start your walk assistant</h1>
-        <p className="mt-3 text-sm leading-6 text-secondary-otto">
-          Otto now stores your profile, location defaults, and call tasks in Supabase so the assistant can operate in the cloud.
+    <div
+      className="flex min-h-[100dvh] items-center justify-center px-4 py-10"
+      style={{ background: "#000000" }}
+    >
+      <div className="w-full max-w-md rounded-[2rem] border border-white/10 bg-white/6 p-7 backdrop-blur-2xl sm:p-8">
+        <p className="text-sm text-white/60">Hello, Welcome to Otto</p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
+          {mode === "sign_in" ? "Sign In" : "Sign Up"}
+        </h1>
+        <p className="mt-3 max-w-sm text-sm leading-6 text-white/50">
+          World&apos;s first autonomous agent that takes action anytime, anywhere.
         </p>
 
+        <div className="mt-8 grid grid-cols-2 gap-2 rounded-[1.5rem] border border-white/10 bg-white/5 p-1">
+          <button
+            type="button"
+            onClick={() => setMode("sign_in")}
+            className={`rounded-[1.1rem] px-4 py-3 text-sm font-medium transition-colors ${
+              mode === "sign_in" ? "bg-white/12 text-white" : "text-white/45"
+            }`}
+          >
+            Sign In
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("sign_up")}
+            className={`rounded-[1.1rem] px-4 py-3 text-sm font-medium transition-colors ${
+              mode === "sign_up" ? "bg-white/12 text-white" : "text-white/45"
+            }`}
+          >
+            Sign Up
+          </button>
+        </div>
+
         <form
-          className="mt-8"
+          className="mt-4 space-y-4"
           onSubmit={async (event) => {
             event.preventDefault();
             const nextEmail = email.trim();
@@ -42,45 +62,52 @@ export default function AuthScreen({ onSendMagicLink }: AuthScreenProps) {
             setBusy(true);
 
             try {
-              await onSendMagicLink(nextEmail);
-              setSentTo(nextEmail);
+              await onSubmit(mode, nextEmail, password);
             } catch (error) {
-              toast.error(error instanceof Error ? error.message : "Could not send the magic link.");
+              toast.error(
+                error instanceof Error
+                  ? error.message
+                  : mode === "sign_in"
+                    ? "Could not sign in."
+                    : "Could not sign up."
+              );
             } finally {
               setBusy(false);
             }
           }}
         >
-          <label className="glass-panel block rounded-3xl p-4">
-            <span className="text-xs uppercase tracking-[0.2em] text-secondary-otto">Email</span>
-            <div className="mt-3 flex items-center gap-3">
-              <Mail size={16} className="text-secondary-otto" />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@example.com"
-                className="w-full bg-transparent text-base outline-none placeholder:text-secondary-otto/60"
-              />
-            </div>
+          <label className="block rounded-[1.5rem] border border-white/10 bg-white/5 px-4 py-3">
+            <span className="text-xs uppercase tracking-[0.2em] text-white/45">Email</span>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="Email"
+              className="mt-3 w-full bg-transparent text-base text-white outline-none placeholder:text-white/25"
+            />
+          </label>
+
+          <label className="block rounded-[1.5rem] border border-white/10 bg-white/5 px-4 py-3">
+            <span className="text-xs uppercase tracking-[0.2em] text-white/45">Password</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Password"
+              className="mt-3 w-full bg-transparent text-base text-white outline-none placeholder:text-white/25"
+            />
           </label>
 
           <button
             type="submit"
             disabled={busy}
-            className="glass-button-primary mt-6 inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium disabled:opacity-50"
+            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-[1.5rem] border border-white/12 bg-white/10 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-white/14 disabled:opacity-50"
           >
-            {busy ? <LoaderCircle size={16} className="animate-spin" /> : <Mail size={16} />}
-            Send magic link
+            {busy ? <LoaderCircle size={16} className="animate-spin" /> : null}
+            {mode === "sign_in" ? "Sign In" : "Sign Up"}
           </button>
         </form>
-
-        {sentTo && (
-          <div className="glass mt-6 rounded-3xl p-4 text-sm leading-6 text-foreground/85">
-            Check <span className="font-medium">{sentTo}</span>. Otto sent a sign-in link so the app can restore your cloud profile.
-          </div>
-        )}
       </div>
     </div>
   );

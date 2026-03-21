@@ -1,6 +1,6 @@
 # Otto AI Navigator
 
-Otto is a mobile-first cloud assistant for live visual guidance, business verification, and booking support. Point your phone at the world, ask by voice or text, and Otto uses Gemini for vision/orchestration, Firecrawl for web retrieval, Supabase for auth and persistent profile/task data, and ElevenLabs plus Twilio for spoken cloud call workflows.
+Otto is a mobile-first cloud assistant for live visual guidance, Firecrawl-first research, business verification, and callback-driven cloud calls. Point your phone at the world, ask by voice or text, and Otto uses Gemini for vision/orchestration, Firecrawl for retrieval, Supabase for auth and persistent task data, and ElevenLabs plus Twilio for business calls and callback briefings.
 
 ## Project structure
 
@@ -8,14 +8,16 @@ Otto is a mobile-first cloud assistant for live visual guidance, business verifi
 - `src/features/auth`: magic-link sign-in
 - `src/features/onboarding`: first-run profile capture
 - `src/features/account`: persistent profile/preferences editing
-- `src/features/tasks`: cloud task history
+- `src/features/tasks`: concierge inbox, approvals, and job history
 - `src/features/otto`: the main Otto assistant experience, grouped by API, components, hooks, session helpers, and types
 - `src/shared/supabase`: Supabase client setup and generated database types
-- `supabase/functions/otto-analyze`: authenticated Gemini + Firecrawl turn orchestration
-- `supabase/functions/otto-call-task`: approved task creation and Twilio launch
-- `supabase/functions/otto-call-webhook`: Twilio webhook for business call turns and callbacks
+- `supabase/functions/otto-analyze`: authenticated Gemini + Firecrawl turn orchestration with call proposals
+- `supabase/functions/otto-call-task`: Firecrawl-backed cloud call task creation and step execution
+- `supabase/functions/otto-call-webhook`: Twilio webhook for business calls and user callback briefings
+- `supabase/functions/otto-task-approval`: approval resolution for pending job actions
 - `supabase/functions/otto-voice`: ElevenLabs speech for the app and cloud calls
-- `supabase/migrations`: database schema for profiles and cloud tasks
+- `supabase/functions/_shared/otto-concierge.ts`: shared task orchestration, SMTP email dispatch, and Twilio helpers
+- `supabase/migrations`: database schema for profiles, concierge jobs, approvals, and emails
 
 ## Environment variables
 
@@ -26,7 +28,10 @@ Frontend:
 
 Supabase SQL:
 
-- run the migration in `supabase/migrations/202603210001_phase4_cloud_agent.sql`
+- run:
+  - `supabase/migrations/202603210001_phase4_cloud_agent.sql`
+  - `supabase/migrations/202603210002_concierge_inbox_email.sql`
+  - `supabase/migrations/202603210003_callback_step_phase6.sql`
 
 Supabase Edge Function secrets:
 
@@ -44,6 +49,17 @@ Supabase Edge Function secrets:
 - `TWILIO_AUTH_TOKEN`
 - `TWILIO_PHONE_NUMBER`
 - `OTTO_WEBHOOK_SECRET`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASSWORD`
+- `SMTP_FROM_NAME`
+- `SMTP_FROM_EMAIL`
+
+Callback phone:
+
+- A user callback phone number is required in onboarding/account settings before Otto can start cloud calls.
+- If SMTP is not configured, email follow-up is treated as optional and is skipped without breaking the callback flow.
 
 ## Local development
 
@@ -61,3 +77,10 @@ npm run lint
 ```
 
 `deno check` is recommended for the edge functions, but Deno must be installed locally first.
+
+## Product rules
+
+- Firecrawl is the only retrieval/search layer.
+- Gemini is the orchestration and planning layer.
+- ElevenLabs plus Twilio handle voice output and telephony.
+- There is no browser automation in this product.

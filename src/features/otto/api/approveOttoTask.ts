@@ -1,12 +1,12 @@
 import { supabase } from "@/shared/supabase/client";
-import type { OttoProposedTask } from "../types";
+import type { OttoCallProposal } from "../types";
 
-export async function approveOttoTask(query: string, subject: string, proposal: OttoProposedTask): Promise<string> {
+export async function approveOttoTask(query: string, subject: string, callProposal: OttoCallProposal): Promise<string> {
   const { data, error } = await supabase.functions.invoke("otto-call-task", {
     body: {
       query,
       subject,
-      proposal,
+      callProposal,
     },
   });
 

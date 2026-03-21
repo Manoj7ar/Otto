@@ -13,11 +13,16 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GOOGLE_API_KEY");
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
 const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
+const SMTP_HOST = Deno.env.get("SMTP_HOST") ?? "";
+const SMTP_USER = Deno.env.get("SMTP_USER") ?? "";
+const SMTP_PASSWORD = Deno.env.get("SMTP_PASSWORD") ?? "";
+const SMTP_FROM_EMAIL = Deno.env.get("SMTP_FROM_EMAIL") ?? "";
 
 type ConfidenceLevel = "low" | "medium" | "high";
 type SearchMode = "none" | "search";
 type ActionType = "source" | "search" | "directions";
 type IntentKind = "answer" | "call_verification" | "call_booking";
+type FollowUpAction = "callback_user" | "send_user_email";
 
 interface AnalyzeRequest {
   query?: string;
@@ -70,15 +75,22 @@ interface OttoAction {
   type: ActionType;
 }
 
-interface OttoProposedTask {
-  taskType: "verification" | "booking";
-  businessName: string;
-  businessPhone: string | null;
-  businessWebsite: string | null;
-  callGoal: string;
-  approvalSummary: string;
-  approvedScope: string[];
-  questions: string[];
+interface OttoCallProposal {
+  callType: "verification" | "booking";
+  title: string;
+  summary: string;
+  callReason: string;
+  callTargetName: string;
+  callTargetPhone: string;
+  callTargetEmail: string | null;
+  firecrawlEvidence: Array<{
+    title: string;
+    url: string;
+    snippet: string;
+    sourceType: string;
+  }>;
+  callQuestions: string[];
+  followUpActions: FollowUpAction[];
 }
 
 interface OttoReply {
@@ -99,7 +111,7 @@ interface OttoReply {
     sourceType: string;
   }>;
   structuredDetails: StructuredDetail[];
-  proposedTask: OttoProposedTask | null;
+  callProposal: OttoCallProposal | null;
 }
 
 interface OttoUserTurn {
@@ -198,33 +210,35 @@ const synthesisSchema = {
       items: { type: "STRING" },
     },
     sessionSummary: { type: "STRING" },
-    proposedTask: {
+    callProposal: {
       type: "OBJECT",
       properties: {
-        taskType: { type: "STRING", enum: ["verification", "booking"] },
-        businessName: { type: "STRING" },
-        businessPhone: { type: "STRING" },
-        businessWebsite: { type: "STRING" },
-        callGoal: { type: "STRING" },
-        approvalSummary: { type: "STRING" },
-        approvedScope: {
+        callType: { type: "STRING", enum: ["verification", "booking"] },
+        title: { type: "STRING" },
+        summary: { type: "STRING" },
+        callReason: { type: "STRING" },
+        callTargetName: { type: "STRING" },
+        callTargetPhone: { type: "STRING" },
+        callTargetEmail: { type: "STRING" },
+        callQuestions: {
           type: "ARRAY",
           items: { type: "STRING" },
         },
-        questions: {
+        followUpActions: {
           type: "ARRAY",
-          items: { type: "STRING" },
+          items: { type: "STRING", enum: ["callback_user", "send_user_email"] },
         },
       },
       required: [
-        "taskType",
-        "businessName",
-        "businessPhone",
-        "businessWebsite",
-        "callGoal",
-        "approvalSummary",
-        "approvedScope",
-        "questions",
+        "callType",
+        "title",
+        "summary",
+        "callReason",
+        "callTargetName",
+        "callTargetPhone",
+        "callTargetEmail",
+        "callQuestions",
+        "followUpActions",
       ],
     },
   },
@@ -284,31 +298,58 @@ function generateId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-function normalizeProposedTask(raw: unknown): OttoProposedTask | null {
+function canSendFollowUpEmail() {
+  return Boolean(SMTP_HOST && SMTP_USER && SMTP_PASSWORD && SMTP_FROM_EMAIL);
+}
+
+function normalizeCallProposal(raw: unknown, sources: SearchSource[], profile: ProfileRow): OttoCallProposal | null {
   const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : null;
 
-  if (!data) {
+  if (!data || sources.length === 0) {
     return null;
   }
 
-  const taskType = data.taskType === "verification" || data.taskType === "booking" ? data.taskType : null;
-  const businessName = cleanText(data.businessName);
-  const callGoal = cleanText(data.callGoal);
-  const approvalSummary = cleanText(data.approvalSummary);
+  const callType =
+    data.callType === "verification" || data.callType === "booking"
+      ? data.callType
+      : null;
+  const title = cleanText(data.title);
+  const summary = cleanText(data.summary);
+  const callReason = cleanText(data.callReason);
+  const callTargetName = cleanText(data.callTargetName);
+  const callTargetPhone = normalizePhone(cleanText(data.callTargetPhone));
+  const requestedFollowUps = cleanStringArray(data.followUpActions, 3)
+    .filter((entry): entry is FollowUpAction => entry === "callback_user" || entry === "send_user_email");
+  const filteredFollowUps = canSendFollowUpEmail()
+    ? requestedFollowUps
+    : requestedFollowUps.filter((entry) => entry !== "send_user_email");
+  const followUpActions = Array.from(
+    new Set<FollowUpAction>([
+      profile.callback_phone ? "callback_user" : filteredFollowUps[0] ?? "callback_user",
+      ...filteredFollowUps,
+    ]),
+  );
 
-  if (!taskType || !businessName || !callGoal || !approvalSummary) {
+  if (!callType || !title || !summary || !callReason || !callTargetName || !callTargetPhone) {
     return null;
   }
 
   return {
-    taskType,
-    businessName,
-    businessPhone: normalizePhone(cleanText(data.businessPhone)) ?? cleanText(data.businessPhone) || null,
-    businessWebsite: cleanText(data.businessWebsite) || null,
-    callGoal,
-    approvalSummary,
-    approvedScope: cleanStringArray(data.approvedScope, 6),
-    questions: cleanStringArray(data.questions, 5),
+    callType,
+    title,
+    summary,
+    callReason,
+    callTargetName,
+    callTargetPhone,
+    callTargetEmail: cleanText(data.callTargetEmail) || null,
+    firecrawlEvidence: sources.slice(0, 3).map(({ title, url, snippet, sourceType }) => ({
+      title,
+      url,
+      snippet,
+      sourceType,
+    })),
+    callQuestions: cleanStringArray(data.callQuestions, 6),
+    followUpActions,
   };
 }
 
@@ -393,7 +434,7 @@ function normalizeReply(raw: unknown): OttoReply | null {
     actions,
     sources,
     structuredDetails,
-    proposedTask: normalizeProposedTask(data.proposedTask),
+    callProposal: data.callProposal as OttoCallProposal | null,
   };
 }
 
@@ -584,6 +625,34 @@ function buildSearchPlanQuery(
   return `${interpretation.subject} ${regionHint}`.trim();
 }
 
+function dedupeSources(sources: SearchSource[]) {
+  const seen = new Set<string>();
+
+  return sources.filter((source) => {
+    if (seen.has(source.url)) {
+      return false;
+    }
+
+    seen.add(source.url);
+    return true;
+  });
+}
+
+function buildFirecrawlQueries(
+  interpretation: Interpretation,
+  searchQuery: string,
+  profile: ProfileRow,
+) {
+  const queries = [searchQuery];
+
+  if (interpretation.intentKind !== "answer") {
+    queries.push(`${interpretation.targetBusinessHint || interpretation.subject} phone contact ${profile.current_region}`.trim());
+    queries.push(`${interpretation.targetBusinessHint || interpretation.subject} official site phone ${profile.current_region}`.trim());
+  }
+
+  return Array.from(new Set(queries.filter(Boolean))).slice(0, 3);
+}
+
 function buildSourceActions(subject: string, searchQuery: string, sources: SearchSource[]): OttoAction[] {
   const actions: OttoAction[] = [];
 
@@ -614,6 +683,16 @@ function buildSourceActions(subject: string, searchQuery: string, sources: Searc
   return actions.slice(0, 3);
 }
 
+function ensureCallPrompt(answer: string, proposal: OttoCallProposal | null) {
+  if (!proposal) {
+    return answer;
+  }
+
+  return /do you want me to make this call\?/i.test(answer)
+    ? answer
+    : `${answer} Do you want me to make this call?`;
+}
+
 function normalizeSynthesis(
   raw: unknown,
   interpretation: Interpretation,
@@ -627,15 +706,15 @@ function normalizeSynthesis(
   const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
   const createdAt = new Date().toISOString();
   const messageId = generateId("msg");
-  const proposedTask = normalizeProposedTask(data.proposedTask);
-  const answer = cleanText(
+  const callProposal = normalizeCallProposal(data.callProposal, sources, profile);
+  const answer = ensureCallPrompt(cleanText(
     data.answer,
-    proposedTask
-      ? "I found a likely business target and prepared a call plan for your approval."
+    callProposal
+      ? `I found enough Firecrawl evidence to call ${callProposal.callTargetName} and verify this for you.`
       : usedWebSearch
         ? "I found relevant information, but I could not confidently summarize it. Try narrowing the question."
         : "I could interpret the scene, but I could not confidently produce a full answer. Try a more specific follow-up."
-  );
+  ), callProposal);
 
   const cleanedStructuredDetails = (Array.isArray(data.structuredDetails) ? data.structuredDetails : [])
     .map((entry) => {
@@ -666,8 +745,8 @@ function normalizeSynthesis(
 
   if (sources.length > 0) {
     cleanedStructuredDetails.push({
-      label: "Web verification",
-      value: `Checked ${sources.length} source${sources.length === 1 ? "" : "s"} for supporting details.`,
+      label: "Firecrawl research",
+      value: `Checked ${sources.length} Firecrawl source${sources.length === 1 ? "" : "s"} to verify the details.`,
     });
   }
 
@@ -699,7 +778,7 @@ function normalizeSynthesis(
         sourceType,
       })),
       structuredDetails: cleanedStructuredDetails.slice(0, 6),
-      proposedTask,
+      callProposal,
     },
     sessionSummary,
   };
@@ -867,6 +946,16 @@ async function searchWithFirecrawl(query: string): Promise<SearchSource[]> {
   }
 }
 
+async function researchWithFirecrawl(
+  interpretation: Interpretation,
+  searchQuery: string,
+  profile: ProfileRow,
+) {
+  const queries = buildFirecrawlQueries(interpretation, searchQuery, profile);
+  const results = await Promise.all(queries.map((query) => searchWithFirecrawl(query)));
+  return dedupeSources(results.flat()).slice(0, 6);
+}
+
 async function getAuthenticatedProfile(req: Request): Promise<ProfileRow> {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     throw new HttpError(500, "Supabase environment is not configured.");
@@ -937,10 +1026,11 @@ serve(async (req) => {
     const interpretation = normalizeInterpretation(
       await callGemini<Interpretation>(
         [
-          "You are Otto, a mobile AI walking companion and task planner.",
+          "You are Otto, a mobile AI walking companion and cloud call planner.",
           "Interpret the current user turn using the current frame when available, plus session memory and the user's stored profile context.",
-          "If the user asks to call, verify, reserve, or book, classify the request as call_verification or call_booking.",
-          "Choose web retrieval when external, fresh, or contact information is needed.",
+          "Use call_verification or call_booking when a live call would materially improve the outcome over research alone.",
+          "Firecrawl is the only retrieval layer. There is no browser automation.",
+          "Choose web retrieval when external, fresh, contact, or verification information is needed.",
           "Keep subjectType short and human-readable.",
         ].join("\n"),
         [
@@ -984,7 +1074,7 @@ serve(async (req) => {
     const shouldSearch =
       interpretation.searchMode === "search" &&
       (interpretation.needsWebSearch || interpretation.intentKind !== "answer");
-    const sources = shouldSearch ? await searchWithFirecrawl(searchQuery) : [];
+    const sources = shouldSearch ? await researchWithFirecrawl(interpretation, searchQuery, profile) : [];
     const usedWebSearch = sources.length > 0;
 
     const synthesisStartedAt = performance.now();
@@ -994,14 +1084,15 @@ serve(async (req) => {
         structuredDetails: StructuredDetail[];
         suggestedFollowUps: string[];
         sessionSummary: string;
-        proposedTask?: OttoProposedTask;
+        callProposal?: OttoCallProposal;
       }>(
         [
-          "You are Otto, a concise walking companion and cloud task planner.",
-          "Answer the current turn using the current frame, session memory, user profile defaults, and any retrieved web evidence.",
-          "If the user wants a phone call and you have enough confidence in the target business and number, return a proposedTask for explicit approval.",
-          "Only return proposedTask when there is a plausible phone number and business name.",
-          "approvedScope must be concrete and concise. Do not include payment collection.",
+          "You are Otto, a concise walking companion and cloud call planner.",
+          "Answer the current turn using the current frame, session memory, user profile defaults, and Firecrawl evidence.",
+          "If a call would help more than research alone, return a callProposal with the target, phone number, exact reason, and question list.",
+          "Only return callProposal when the phone number is plausible from Firecrawl-backed evidence.",
+          "Default followUpActions to callback_user. Add send_user_email only when it materially helps and email follow-up is configured.",
+          "There is no browser automation.",
           "Do not invent hours, prices, ratings, names, URLs, or phone numbers.",
           "Session summary should be a short memory string that helps the next follow-up resolve correctly.",
         ].join("\n"),
@@ -1016,7 +1107,7 @@ serve(async (req) => {
                 summary: sessionContext.summary,
                 recentTurns: formatTurnHistory(sessionContext.turns),
               },
-              sources: sources.map((source, index) => ({
+              firecrawlSources: sources.map((source, index) => ({
                 id: index + 1,
                 title: source.title,
                 url: source.url,
