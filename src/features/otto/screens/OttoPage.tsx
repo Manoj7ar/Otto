@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { MessageSquareText, RotateCcw } from "lucide-react";
+import { History, MessageSquareText, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
+import type { ProfileRow } from "@/features/account/profile";
+import { approveOttoTask } from "../api/approveOttoTask";
+import { fetchOttoVoice } from "../api/fetchOttoVoice";
 import { submitOttoTurn } from "../api/submitOttoTurn";
-import CameraView, { CameraViewHandle } from "../components/CameraView";
+import CallApprovalSheet from "../components/CallApprovalSheet";
+import CameraView, { type CameraViewHandle } from "../components/CameraView";
 import InputBar from "../components/InputBar";
 import OttoOrb from "../components/OttoOrb";
 import SessionDrawer from "../components/SessionDrawer";
@@ -11,16 +15,27 @@ import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
 import { createOttoSessionContext } from "../session";
 import type { OttoReplyData, OttoSessionContext } from "../types";
 
-export default function OttoPage() {
+interface OttoPageProps {
+  profile: ProfileRow;
+  onOpenTasks: () => void;
+  onTaskCreated: () => Promise<void> | void;
+}
+
+export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPageProps) {
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [flashCount, setFlashCount] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
+  const [approvalVisible, setApprovalVisible] = useState(false);
   const [latestReply, setLatestReply] = useState<OttoReplyData | null>(null);
   const [sessionContext, setSessionContext] = useState<OttoSessionContext>(() => createOttoSessionContext());
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [latestQuery, setLatestQuery] = useState("");
+  const [approvingTask, setApprovingTask] = useState(false);
   const cameraRef = useRef<CameraViewHandle>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
 
   const {
     isListening,
@@ -32,38 +47,75 @@ export default function OttoPage() {
   } = useSpeechRecognition();
 
   const canSpeak = useMemo(
-    () => typeof window !== "undefined" && "speechSynthesis" in window,
+    () => typeof window !== "undefined" && ("Audio" in window || "speechSynthesis" in window),
     []
   );
   const hasSessionTurns = sessionContext.turns.length > 0;
 
-  const stopSpeaking = useCallback(() => {
-    if (!canSpeak) {
+  const fallbackSpeak = useCallback((text: string) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window) || !text.trim()) {
       return;
     }
 
     window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  const stopSpeaking = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+
     setIsSpeaking(false);
-  }, [canSpeak]);
+  }, []);
 
   const speakResponse = useCallback(
-    (text: string) => {
-      if (!canSpeak || !text.trim()) {
+    async (text: string) => {
+      if (!text.trim()) {
         return;
       }
 
-      window.speechSynthesis.cancel();
+      stopSpeaking();
 
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1;
-      utterance.pitch = 1;
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
-
-      window.speechSynthesis.speak(utterance);
+      try {
+        const blob = await fetchOttoVoice(text);
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioUrlRef.current = url;
+        audioRef.current = audio;
+        audio.onplay = () => setIsSpeaking(true);
+        audio.onended = () => {
+          setIsSpeaking(false);
+          if (audioUrlRef.current) {
+            URL.revokeObjectURL(audioUrlRef.current);
+            audioUrlRef.current = null;
+          }
+        };
+        audio.onerror = () => {
+          setIsSpeaking(false);
+          fallbackSpeak(text);
+        };
+        await audio.play();
+      } catch (error) {
+        console.error("otto_voice_error", error);
+        fallbackSpeak(text);
+      }
     },
-    [canSpeak]
+    [fallbackSpeak, stopSpeaking]
   );
 
   useEffect(() => () => stopSpeaking(), [stopSpeaking]);
@@ -74,11 +126,17 @@ export default function OttoPage() {
     }
 
     const timer = window.setTimeout(() => {
-      speakResponse(latestReply.answer);
+      void speakResponse(latestReply.answer);
     }, 180);
 
     return () => window.clearTimeout(timer);
   }, [isMuted, latestReply, speakResponse]);
+
+  useEffect(() => {
+    if (latestReply?.proposedTask) {
+      setApprovalVisible(true);
+    }
+  }, [latestReply]);
 
   const handleCameraToggle = useCallback(() => {
     setCameraEnabled((enabled) => !enabled);
@@ -104,6 +162,7 @@ export default function OttoPage() {
       }
 
       setIsProcessing(true);
+      setLatestQuery(text.trim());
       resetTranscript();
 
       try {
@@ -151,7 +210,7 @@ export default function OttoPage() {
     }
 
     setIsMuted(false);
-    speakResponse(latestReply.answer);
+    void speakResponse(latestReply.answer);
   }, [canSpeak, latestReply, speakResponse]);
 
   const handleToggleMute = useCallback(() => {
@@ -161,7 +220,7 @@ export default function OttoPage() {
       if (nextMuted) {
         stopSpeaking();
       } else if (latestReply) {
-        speakResponse(latestReply.answer);
+        void speakResponse(latestReply.answer);
       }
 
       return nextMuted;
@@ -179,9 +238,32 @@ export default function OttoPage() {
     resetTranscript();
     setLatestReply(null);
     setDrawerVisible(false);
+    setApprovalVisible(false);
+    setLatestQuery("");
     setSessionContext(createOttoSessionContext());
     toast.success("Walk session reset.");
   }, [resetTranscript, stopListening, stopSpeaking]);
+
+  const handleApproveTask = useCallback(async () => {
+    if (!latestReply?.proposedTask) {
+      return;
+    }
+
+    setApprovingTask(true);
+
+    try {
+      await approveOttoTask(latestQuery, latestReply.subject, latestReply.proposedTask);
+      await onTaskCreated();
+      setApprovalVisible(false);
+      toast.success("Cloud call task started.");
+      onOpenTasks();
+    } catch (error) {
+      console.error("otto_task_approval_error", error);
+      toast.error(error instanceof Error ? error.message : "Could not start the cloud call task.");
+    } finally {
+      setApprovingTask(false);
+    }
+  }, [latestQuery, latestReply, onOpenTasks, onTaskCreated]);
 
   const showGreeting = !cameraEnabled && !hasSessionTurns && !isProcessing;
   const showMiniOrb = cameraEnabled || hasSessionTurns || isProcessing;
@@ -194,13 +276,13 @@ export default function OttoPage() {
         : "idle";
 
   return (
-    <div className="relative flex min-h-[100dvh] flex-col items-center justify-center overflow-hidden bg-background">
+    <div className="relative flex min-h-[calc(100dvh-5rem)] flex-col items-center justify-center overflow-hidden bg-background">
       <CameraView ref={cameraRef} active={cameraEnabled} flashTrigger={flashCount} />
 
       <AnimatePresence>
         {showMiniOrb && (
           <motion.div
-            className="fixed right-5 top-14 z-20"
+            className="fixed right-5 top-[5.75rem] z-20"
             initial={{ opacity: 0, scale: 0.3 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.3 }}
@@ -214,19 +296,15 @@ export default function OttoPage() {
       <AnimatePresence>
         {hasSessionTurns && (
           <motion.div
-            className="fixed left-4 top-14 z-20 max-w-[calc(100vw-7rem)]"
+            className="fixed left-4 top-[5.75rem] z-20 max-w-[calc(100vw-7rem)]"
             initial={{ opacity: 0, y: -12 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -12 }}
           >
             <div className="glass-strong flex items-center gap-3 rounded-full px-4 py-3">
               <div className="min-w-0">
-                <p className="truncate text-xs uppercase tracking-[0.2em] text-secondary-otto">
-                  Current walk
-                </p>
-                <p className="truncate text-sm text-foreground">
-                  {sessionContext.activeSubject || "Live session"}
-                </p>
+                <p className="truncate text-xs uppercase tracking-[0.2em] text-secondary-otto">Current walk</p>
+                <p className="truncate text-sm text-foreground">{sessionContext.activeSubject || "Live session"}</p>
               </div>
               <button
                 type="button"
@@ -235,6 +313,14 @@ export default function OttoPage() {
                 aria-label="Open conversation"
               >
                 <MessageSquareText size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={onOpenTasks}
+                className="glass flex h-9 w-9 items-center justify-center rounded-full"
+                aria-label="Open tasks"
+              >
+                <History size={16} />
               </button>
               <button
                 type="button"
@@ -268,7 +354,7 @@ export default function OttoPage() {
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.2, duration: 0.5 }}
               >
-                Hello there
+                Hello {profile.full_name || "there"}
               </motion.p>
               <motion.h1
                 className="mt-2 text-2xl font-semibold tracking-tight"
@@ -277,7 +363,7 @@ export default function OttoPage() {
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.35, duration: 0.5 }}
               >
-                Start a walk session and keep asking follow-ups.
+                Point, ask, verify, and launch cloud call tasks.
               </motion.h1>
               <motion.p
                 className="mt-4 max-w-sm text-sm leading-6 text-secondary-otto"
@@ -285,7 +371,7 @@ export default function OttoPage() {
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.45, duration: 0.5 }}
               >
-                Otto keeps the current subject and recent turns in memory, so you can keep exploring without restating context every time.
+                Otto now uses your saved location, language, timezone, and callback preferences to plan research and business calls in the cloud.
               </motion.p>
             </div>
           </motion.div>
@@ -308,7 +394,7 @@ export default function OttoPage() {
               animate={{ opacity: [0, 1, 1, 0.6] }}
               transition={{ duration: 2, repeat: Infinity }}
             >
-              Updating the walk session and checking the web...
+              Planning with Gemini, checking Firecrawl, and updating the cloud context...
             </motion.p>
           </motion.div>
         )}
@@ -325,6 +411,15 @@ export default function OttoPage() {
         isSpeaking={isSpeaking}
         onReplay={handleReplay}
         onToggleMute={handleToggleMute}
+        onReviewTaskProposal={() => setApprovalVisible(true)}
+      />
+
+      <CallApprovalSheet
+        proposal={latestReply?.proposedTask ?? null}
+        visible={approvalVisible}
+        busy={approvingTask}
+        onApprove={handleApproveTask}
+        onClose={() => setApprovalVisible(false)}
       />
 
       <InputBar

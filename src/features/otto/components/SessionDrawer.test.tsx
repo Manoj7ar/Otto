@@ -29,6 +29,7 @@ const latestReply: OttoReplyData = {
     { label: "What Otto saw", value: "A large stone museum entrance with columns." },
     { label: "Web verification", value: "Checked the official museum site." },
   ],
+  proposedTask: null,
 };
 
 const sessionContext: OttoSessionContext = {
@@ -70,6 +71,7 @@ describe("SessionDrawer", () => {
         isSpeaking={false}
         onReplay={() => {}}
         onToggleMute={() => {}}
+        onReviewTaskProposal={() => {}}
       />
     );
 
@@ -99,6 +101,7 @@ describe("SessionDrawer", () => {
         isSpeaking={false}
         onReplay={onReplay}
         onToggleMute={onToggleMute}
+        onReviewTaskProposal={() => {}}
       />
     );
 

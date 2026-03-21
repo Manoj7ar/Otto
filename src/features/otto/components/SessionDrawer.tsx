@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ExternalLink, Eye, Globe, Mic2, MicOff, RotateCcw, Sparkles, Volume2, X } from "lucide-react";
+import { ExternalLink, Eye, Globe, Mic2, MicOff, Phone, RotateCcw, Sparkles, Volume2, X } from "lucide-react";
 import type { OttoReplyData, OttoSessionContext } from "../types";
 
 interface SessionDrawerProps {
@@ -13,6 +13,7 @@ interface SessionDrawerProps {
   isSpeaking: boolean;
   onReplay: () => void;
   onToggleMute: () => void;
+  onReviewTaskProposal: () => void;
 }
 
 const confidenceLabel: Record<OttoReplyData["confidence"], string> = {
@@ -45,6 +46,7 @@ export default function SessionDrawer({
   isSpeaking,
   onReplay,
   onToggleMute,
+  onReviewTaskProposal,
 }: SessionDrawerProps) {
   if (sessionContext.turns.length === 0) {
     return null;
@@ -207,6 +209,17 @@ export default function SessionDrawer({
                           </span>
                         ))}
                       </div>
+                    )}
+
+                    {isLatestAssistantTurn && turn.reply.proposedTask && (
+                      <button
+                        type="button"
+                        onClick={onReviewTaskProposal}
+                        className="glass-button-primary inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-medium"
+                      >
+                        <Phone size={14} />
+                        Review call approval
+                      </button>
                     )}
 
                     {isLatestAssistantTurn && turn.reply.sources.length > 0 && (

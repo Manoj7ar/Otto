@@ -11,6 +11,17 @@ export interface OttoAction {
   type: "source" | "search" | "directions";
 }
 
+export interface OttoProposedTask {
+  taskType: "verification" | "booking";
+  businessName: string;
+  businessPhone: string | null;
+  businessWebsite: string | null;
+  callGoal: string;
+  approvalSummary: string;
+  approvedScope: string[];
+  questions: string[];
+}
+
 export interface StructuredDetail {
   label: string;
   value: string;
@@ -29,6 +40,7 @@ export interface OttoReplyData {
   actions: OttoAction[];
   sources: OttoSource[];
   structuredDetails: StructuredDetail[];
+  proposedTask: OttoProposedTask | null;
 }
 
 export interface OttoUserTurn {
