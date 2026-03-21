@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { History, MessageSquareText, RotateCcw, X } from "lucide-react";
+import { History, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import type { ProfileRow } from "@/features/account/profile";
 import { approveOttoTask } from "../api/approveOttoTask";
@@ -9,8 +9,6 @@ import { submitOttoTurn } from "../api/submitOttoTurn";
 import CallApprovalSheet from "../components/CallApprovalSheet";
 import CameraView, { type CameraViewHandle } from "../components/CameraView";
 import InputBar from "../components/InputBar";
-import OttoOrb from "../components/OttoOrb";
-import SessionDrawer from "../components/SessionDrawer";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
 import { createOttoSessionContext } from "../session";
 import type { OttoReplyData, OttoSessionContext } from "../types";
@@ -24,7 +22,7 @@ interface OttoPageProps {
 function WavingOtterGreeting() {
   return (
     <motion.div
-      className="pointer-events-none fixed inset-0 z-10 flex flex-col items-center justify-center px-6 text-center"
+      className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -33,7 +31,7 @@ function WavingOtterGreeting() {
       <img
         src="/otter.png"
         alt="Otter"
-        className="h-auto w-[min(22rem,68vw)] object-contain"
+        className="h-auto w-[min(18rem,58vw)] object-contain"
         draggable={false}
       />
 
@@ -47,13 +45,25 @@ function WavingOtterGreeting() {
   );
 }
 
+function formatBubbleTime(timestamp: string) {
+  const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPageProps) {
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [cameraStatus, setCameraStatus] = useState<"idle" | "requesting" | "ready" | "denied" | "unavailable">("idle");
   const [capturedImageBase64, setCapturedImageBase64] = useState<string | null>(null);
   const [flashCount, setFlashCount] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [drawerVisible, setDrawerVisible] = useState(false);
   const [approvalVisible, setApprovalVisible] = useState(false);
   const [latestReply, setLatestReply] = useState<OttoReplyData | null>(null);
   const [sessionContext, setSessionContext] = useState<OttoSessionContext>(() => createOttoSessionContext());
@@ -229,7 +239,6 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
         setSessionContext(data.sessionContext);
         setCapturedImageBase64(null);
         setCameraEnabled(false);
-        setDrawerVisible(true);
       } catch (error: unknown) {
         console.error("Otto analyze error:", error);
         toast.error(error instanceof Error ? error.message : "Something went wrong. Please try again.");
@@ -273,25 +282,6 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
     void speakResponse(latestReply.answer);
   }, [canSpeak, latestReply, speakResponse]);
 
-  const handleToggleMute = useCallback(() => {
-    setIsMuted((muted) => {
-      const nextMuted = !muted;
-
-      if (nextMuted) {
-        stopSpeaking();
-      } else if (latestReply) {
-        void speakResponse(latestReply.answer);
-      }
-
-      return nextMuted;
-    });
-  }, [latestReply, speakResponse, stopSpeaking]);
-
-  const handleHideDrawer = useCallback(() => {
-    stopSpeaking();
-    setDrawerVisible(false);
-  }, [stopSpeaking]);
-
   const handleResetSession = useCallback(() => {
     stopListening();
     stopSpeaking();
@@ -299,7 +289,6 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
     setCapturedImageBase64(null);
     setCameraEnabled(false);
     setLatestReply(null);
-    setDrawerVisible(false);
     setApprovalVisible(false);
     setLatestQuery("");
     setSessionContext(createOttoSessionContext());
@@ -333,19 +322,18 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
   }, [latestQuery, latestReply, onOpenTasks, onTaskCreated, profile.callback_phone]);
 
   const showGreeting = !cameraEnabled && !hasSessionTurns && !isProcessing;
-  const showMiniOrb = hasSessionTurns || isProcessing || isSpeaking || isListening;
-  const orbMode = isProcessing
-    ? "processing"
-    : isSpeaking
-      ? "speaking"
-      : isListening
-        ? "listening"
-        : "idle";
   const capturedPreviewUrl = capturedImageBase64 ? `data:image/jpeg;base64,${capturedImageBase64}` : null;
   const canCapturePhoto = cameraEnabled && cameraStatus === "ready" && !capturedImageBase64;
+  const pendingUserMessage = isProcessing && latestQuery
+    ? {
+      id: "pending-user",
+      content: latestQuery,
+      createdAt: new Date().toISOString(),
+    }
+    : null;
 
   return (
-    <div>
+    <div className="relative flex h-[calc(100dvh-5rem)] flex-col overflow-hidden">
       <CameraView
         ref={cameraRef}
         active={cameraEnabled}
@@ -371,20 +359,6 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
       </AnimatePresence>
 
       <AnimatePresence>
-        {showMiniOrb && (
-          <motion.div
-            className="fixed right-5 top-[5.75rem] z-20"
-            initial={{ opacity: 0, scale: 0.3 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.3 }}
-            transition={{ type: "spring", stiffness: 300, damping: 25 }}
-          >
-            <OttoOrb mode={orbMode} mini />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
         {cameraEnabled && capturedPreviewUrl && !isProcessing && (
           <motion.div
             className="pointer-events-none fixed left-1/2 top-1/2 z-20 w-[min(72vw,18rem)] -translate-x-1/2 -translate-y-1/2"
@@ -403,31 +377,14 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {hasSessionTurns && !cameraEnabled && (
-          <motion.div
-            className="fixed left-4 top-[5.75rem] z-20 max-w-[calc(100vw-7rem)]"
-            initial={{ opacity: 0, y: -12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -12 }}
-          >
-            <div className="glass-strong flex items-center gap-3 rounded-full px-4 py-3">
-              <div className="min-w-0">
-                <p className="truncate text-xs uppercase tracking-[0.2em] text-secondary-otto">Current walk</p>
-                <p className="truncate text-sm text-foreground">{sessionContext.activeSubject || "Live session"}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setDrawerVisible(true)}
-                className="glass flex h-9 w-9 items-center justify-center rounded-full"
-                aria-label="Open conversation"
-              >
-                <MessageSquareText size={16} />
-              </button>
+      {!cameraEnabled && (
+        <div className="mx-auto flex h-full w-full max-w-5xl flex-1 flex-col overflow-hidden px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-6 sm:px-6">
+          <div className="mb-5 flex items-center justify-end gap-3">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={onOpenTasks}
-                className="glass flex h-9 w-9 items-center justify-center rounded-full"
+                className="glass-button inline-flex h-11 w-11 items-center justify-center rounded-full"
                 aria-label="Open tasks"
               >
                 <History size={16} />
@@ -435,57 +392,139 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
               <button
                 type="button"
                 onClick={handleResetSession}
-                className="glass flex h-9 w-9 items-center justify-center rounded-full"
+                className="glass-button inline-flex h-11 w-11 items-center justify-center rounded-full"
                 aria-label="Reset session"
               >
                 <RotateCcw size={16} />
               </button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
 
-      <AnimatePresence mode="wait">
-        {showGreeting && (
-          <WavingOtterGreeting key="greeting" />
-        )}
-      </AnimatePresence>
+          <div className="glass-strong flex min-h-0 flex-1 flex-col overflow-hidden rounded-[2rem]">
+            <div className="flex-1 space-y-5 overflow-hidden px-4 py-5 sm:px-6 sm:py-6">
+              <AnimatePresence mode="wait">
+                {showGreeting && <WavingOtterGreeting key="greeting" />}
+              </AnimatePresence>
 
-      <AnimatePresence>
-        {isProcessing && (
-          <motion.div
-            className="fixed inset-0 z-10 flex flex-col items-center justify-center px-6 text-center"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.4 }}
-          >
-            <OttoOrb mode="processing" />
-            <motion.p
-              className="mt-8 text-sm font-light tracking-wide text-secondary-otto"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: [0, 1, 1, 0.6] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            >
-              Planning with Gemini, pulling Firecrawl research, and preparing the cloud workflow...
-            </motion.p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              {!showGreeting && (
+                <>
+                  {sessionContext.turns.map((turn) => {
+                    if (turn.role === "user") {
+                      return (
+                        <motion.div
+                          key={turn.id}
+                          initial={{ opacity: 0, y: 18 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="ml-auto flex w-full max-w-xl flex-col items-end gap-2"
+                        >
+                          <span className="px-2 text-[11px] uppercase tracking-[0.22em] text-secondary-otto">Sent by me</span>
+                          <div className="glass w-full rounded-[1.8rem] rounded-br-md px-5 py-4 text-sm leading-7 text-foreground">
+                            {turn.content}
+                          </div>
+                          <span className="px-2 text-[11px] text-secondary-otto">{formatBubbleTime(turn.createdAt)}</span>
+                        </motion.div>
+                      );
+                    }
 
-      <SessionDrawer
-        visible={drawerVisible}
-        onClose={handleHideDrawer}
-        onResetSession={handleResetSession}
-        latestReply={latestReply}
-        sessionContext={sessionContext}
-        canSpeak={canSpeak}
-        isMuted={isMuted}
-        isSpeaking={isSpeaking}
-        onReplay={handleReplay}
-        onToggleMute={handleToggleMute}
-        onReviewTaskProposal={() => setApprovalVisible(true)}
-      />
+                    return (
+                      <motion.div
+                        key={turn.id}
+                        initial={{ opacity: 0, y: 18 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex w-full max-w-2xl items-start gap-3"
+                      >
+                        <img
+                          src="/otter.png"
+                          alt="Otter"
+                          className="mt-1 h-11 w-11 rounded-full border border-black/10 bg-white/45 object-cover p-1"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <span className="px-2 text-[11px] uppercase tracking-[0.22em] text-secondary-otto">Back to me</span>
+                          <div className="glass-panel mt-2 rounded-[1.8rem] rounded-bl-md px-5 py-4 text-sm leading-7 text-foreground">
+                            <p>{turn.content}</p>
+
+                            {turn.reply.structuredDetails.length > 0 && turn.reply.subjectType !== "assistant" && (
+                              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                {turn.reply.structuredDetails.slice(0, 4).map((detail) => (
+                                  <div key={`${detail.label}-${detail.value}`} className="rounded-[1.2rem] border border-black/10 bg-white/30 px-4 py-3">
+                                    <p className="text-[11px] uppercase tracking-[0.2em] text-secondary-otto">{detail.label}</p>
+                                    <p className="mt-2 text-sm leading-6 text-foreground/90">{detail.value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {latestReply?.messageId === turn.reply.messageId && canSpeak && (
+                              <div className="mt-4 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={handleReplay}
+                                  className="glass-button rounded-full px-4 py-2 text-xs font-medium"
+                                >
+                                  {isSpeaking ? "Speaking..." : "Replay voice"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsMuted((value) => !value)}
+                                  className="glass-button rounded-full px-4 py-2 text-xs font-medium"
+                                >
+                                  {isMuted ? "Unmute auto voice" : "Mute auto voice"}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          <span className="mt-2 block px-2 text-[11px] text-secondary-otto">{formatBubbleTime(turn.createdAt)}</span>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+
+                  {pendingUserMessage && (
+                    <>
+                      <motion.div
+                        initial={{ opacity: 0, y: 18 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="ml-auto flex w-full max-w-xl flex-col items-end gap-2"
+                      >
+                        <span className="px-2 text-[11px] uppercase tracking-[0.22em] text-secondary-otto">Sent by me</span>
+                        <div className="glass w-full rounded-[1.8rem] rounded-br-md px-5 py-4 text-sm leading-7 text-foreground">
+                          {pendingUserMessage.content}
+                        </div>
+                        <span className="px-2 text-[11px] text-secondary-otto">{formatBubbleTime(pendingUserMessage.createdAt)}</span>
+                      </motion.div>
+
+                      <motion.div
+                        initial={{ opacity: 0, y: 18 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex w-full max-w-xl items-start gap-3"
+                      >
+                        <img
+                          src="/otter.png"
+                          alt="Otter"
+                          className="mt-1 h-11 w-11 rounded-full border border-black/10 bg-white/45 object-cover p-1"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <span className="px-2 text-[11px] uppercase tracking-[0.22em] text-secondary-otto">Otter is thinking</span>
+                          <div className="glass-panel mt-2 rounded-[1.8rem] rounded-bl-md px-5 py-4 text-sm leading-7 text-foreground">
+                            <div className="flex items-center gap-3">
+                              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/75" />
+                              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/55 [animation-delay:160ms]" />
+                              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/35 [animation-delay:320ms]" />
+                            </div>
+                            <p className="mt-4 text-sm text-foreground/70">
+                              Thinking through your message and preparing the reply...
+                            </p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <CallApprovalSheet
         proposal={latestReply?.callProposal ?? null}

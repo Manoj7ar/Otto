@@ -343,7 +343,13 @@ export default function App() {
       )}
 
       {user && onboardingComplete && profile && (
-        <div className="min-h-[100dvh] pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
+        <div
+          className={
+            activeTab === "otto"
+              ? "flex h-[100dvh] flex-col overflow-hidden"
+              : "min-h-[100dvh] pb-[calc(6.5rem+env(safe-area-inset-bottom))]"
+          }
+        >
           <header className="sticky top-0 z-40 bg-transparent">
             <div className="mx-auto flex max-w-5xl justify-center px-4 py-4">
               <div className="glass grid w-full max-w-sm grid-cols-3 rounded-full p-1">
