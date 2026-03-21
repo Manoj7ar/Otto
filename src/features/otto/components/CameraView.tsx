@@ -14,6 +14,54 @@ export interface CameraViewHandle {
 
 type CameraStatus = "idle" | "requesting" | "ready" | "denied" | "unavailable";
 
+const PRIMARY_VIDEO_CONSTRAINTS: MediaTrackConstraints = {
+  facingMode: { ideal: "environment" },
+  width: { ideal: 2560 },
+  height: { ideal: 1440 },
+  aspectRatio: { ideal: 4 / 3 },
+};
+
+const FALLBACK_VIDEO_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 1920 },
+  height: { ideal: 1080 },
+};
+
+async function enhanceTrack(track: MediaStreamTrack) {
+  const capabilities = (typeof track.getCapabilities === "function"
+    ? track.getCapabilities()
+    : {}) as Record<string, unknown>;
+  const advanced: Record<string, unknown> = {};
+  const focusMode = capabilities.focusMode;
+  const exposureMode = capabilities.exposureMode;
+  const whiteBalanceMode = capabilities.whiteBalanceMode;
+  const zoom = capabilities.zoom as { max?: number } | undefined;
+
+  if (Array.isArray(focusMode) && focusMode.includes("continuous")) {
+    advanced.focusMode = "continuous";
+  }
+
+  if (Array.isArray(exposureMode) && exposureMode.includes("continuous")) {
+    advanced.exposureMode = "continuous";
+  }
+
+  if (Array.isArray(whiteBalanceMode) && whiteBalanceMode.includes("continuous")) {
+    advanced.whiteBalanceMode = "continuous";
+  }
+
+  if (typeof zoom?.max === "number" && zoom.max >= 1) {
+    advanced.zoom = 1;
+  }
+
+  const advancedEntries = Object.keys(advanced).length > 0 ? [advanced] : [];
+
+  await track.applyConstraints({
+    width: { ideal: 2560 },
+    height: { ideal: 1440 },
+    aspectRatio: { ideal: 4 / 3 },
+    advanced: advancedEntries,
+  }).catch(() => undefined);
+}
+
 const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flashTrigger, onStatusChange }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -29,17 +77,21 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
         return null;
       }
 
-      canvas.width = Math.min(video.videoWidth, 1280);
-      canvas.height = Math.min(video.videoHeight, 960);
+      const maxDimension = 2048;
+      const scale = Math.min(1, maxDimension / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
 
       const ctx = canvas.getContext("2d");
       if (!ctx) {
         return null;
       }
 
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
       return dataUrl.split(",")[1];
     },
     isReady: () => cameraStatus === "ready",
@@ -84,7 +136,7 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
     const requestStream = async () => {
       try {
         return await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
+          video: PRIMARY_VIDEO_CONSTRAINTS,
           audio: false,
         });
       } catch (error) {
@@ -95,7 +147,7 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
           domError?.name === "NotFoundError" ||
           domError?.name === "AbortError"
         ) {
-          return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          return await navigator.mediaDevices.getUserMedia({ video: FALLBACK_VIDEO_CONSTRAINTS, audio: false });
         }
 
         throw error;
@@ -110,6 +162,11 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
         }
 
         streamRef.current = stream;
+        const [videoTrack] = stream.getVideoTracks();
+
+        if (videoTrack) {
+          void enhanceTrack(videoTrack);
+        }
 
         const video = videoRef.current;
 
@@ -175,6 +232,11 @@ const CameraView = forwardRef<CameraViewHandle, CameraViewProps>(({ active, flas
               playsInline
               muted
               className={`h-full w-full object-cover ${cameraStatus === "ready" ? "opacity-100" : "opacity-0"}`}
+              style={{
+                imageRendering: "auto",
+                transform: "translateZ(0)",
+                backfaceVisibility: "hidden",
+              }}
             />
 
             {cameraStatus !== "ready" && (

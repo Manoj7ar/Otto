@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { History, RotateCcw, X } from "lucide-react";
+import { History, Paperclip, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import type { ProfileRow } from "@/features/account/profile";
 import { approveOttoTask } from "../api/approveOttoTask";
@@ -517,14 +517,38 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
         onClose={() => setApprovalVisible(false)}
       />
 
+      <AnimatePresence>
+        {!cameraEnabled && capturedImageBase64 && !isProcessing && (
+          <motion.div
+            className="fixed inset-x-0 bottom-[calc(6.75rem+env(safe-area-inset-bottom))] z-40 px-3 sm:px-4"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+          >
+            <div className="mx-auto flex max-w-xl justify-center sm:justify-start">
+              <div className="glass inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs text-foreground">
+                <Paperclip size={14} />
+                <span>Image attached</span>
+                <button
+                  type="button"
+                  onClick={handleRetakePhoto}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded-full text-secondary-otto"
+                  aria-label="Remove attached image"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {!cameraEnabled ? (
         <InputBar
           onSubmit={handleSubmit}
           onCameraClick={handleCameraToggle}
           onMicToggle={handleMicToggle}
-          onClearAttachment={handleRetakePhoto}
           isCameraActive={cameraEnabled}
-          hasImageAttachment={Boolean(capturedImageBase64)}
           isListening={isListening}
           isLiveMode={isLiveMode}
           isLivePaused={liveAgentPaused}
