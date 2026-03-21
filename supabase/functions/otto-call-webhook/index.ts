@@ -66,7 +66,7 @@ function buildGatherResponse(taskId: string, prompt: string, turn: number) {
   const actionUrl = `${SUPABASE_URL}/functions/v1/otto-call-webhook?taskId=${encodeURIComponent(taskId)}&token=${encodeURIComponent(OTTO_WEBHOOK_SECRET)}&step=gather&turn=${turn}`;
 
   return xml(
-    `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl(prompt, "call"))}</Play><Gather input="speech" speechTimeout="auto" timeout="5" method="POST" action="${escapeXml(actionUrl)}" language="en-US" /></Response>`,
+    `<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech" speechTimeout="auto" timeout="5" actionOnEmptyResult="true" method="POST" action="${escapeXml(actionUrl)}" language="en-US"><Play>${escapeXml(buildVoiceUrl(prompt, "call"))}</Play></Gather></Response>`,
   );
 }
 
