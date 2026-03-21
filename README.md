@@ -1,72 +1,182 @@
-# Otto 
-An AI concierge leveraging Firecrawl for real-time web research and evidence gathering, plus ElevenLabs for natural voice replies, live call prompts, and callback briefings.
+# Otto
+Otto is a mobile-first AI concierge that turns uncertain real-world tasks into verified outcomes.
+
+Instead of stopping at "here are some links," Otto can research the live web, decide when a phone call is actually the better tool, place that call from the cloud, and call the user back with a spoken summary.
+
+At the center of that experience are two systems:
+
+- `Firecrawl` for live retrieval, evidence gathering, and source-backed actionability
+- `ElevenLabs` for Otto's voice across the app, the business call, and the callback briefing
 
 <p align="center">
   <img src="public/otter-readme.png" alt="Otto otter mark" width="320" />
 </p>
 
-Otto is a cloud-run AI concierge built around two core production systems:
+## Why We Built It
 
-- `Firecrawl` for fresh web retrieval, evidence capture, and business-target discovery
-- `ElevenLabs` for every spoken Otto voice experience in the app and on the phone
+Most assistants are still weak at one of two things:
 
-Gemini is the orchestration layer. Supabase is the product backend. Twilio is the telephony bridge.
+- they can talk, but they cannot verify
+- they can retrieve links, but they cannot finish the job
 
-The result is a mobile-first assistant that can:
+Real users do not just want information. They want outcomes:
 
-- answer quick conversational turns directly
-- research the web when fresh information is needed
-- propose a live verification or booking call
-- place that call from the cloud
-- call the user back with a spoken briefing
+- "Can you check if this place is open?"
+- "Can you verify whether they have vegetarian options?"
+- "Can you make sure a reservation is actually available?"
+- "Can you tell me what I'm looking at and help me decide what to do next?"
 
-## Product Model
+Otto was built for that gap.
 
-Otto is not a generic chatbot bolted onto a phone system.
+It combines:
 
-The live architecture has a strict division of responsibility:
+- fast conversational orchestration
+- live web research
+- vision input from the camera
+- voice output that sounds consistent and human
+- cloud phone calls when verification matters more than another web answer
 
-- `Gemini` decides what the user is asking, whether retrieval is needed, and how to synthesize the answer
-- `Firecrawl` provides the real-world evidence when Otto needs current web information
-- `ElevenLabs` generates the actual Otto voice for browser replies, business-call prompts, and callback briefings
-- `Twilio` delivers the phone call and webhook lifecycle
-- `Supabase` stores auth, profiles, tasks, steps, approvals, logs, and edge functions
+The result is an assistant that can move from question to confirmation.
 
-That separation matters. The app is designed so conversational turns do not pay the cost of web retrieval, while real verification or booking flows still have retrieval-backed evidence when needed.
+## What Otto Does
 
-## Core Experience
+Otto is designed around a simple progression:
 
-### 1. Conversational turns
+1. Understand the user's intent
+2. Decide whether the answer needs live web evidence
+3. Use Firecrawl if current external information matters
+4. Use Gemini to synthesize the best next step
+5. If the task needs real-world verification, place a phone call
+6. Use ElevenLabs to speak as Otto
+7. Call the user back with the result
 
-For lightweight input like:
+In practice, Otto can:
+
+- answer lightweight conversational questions instantly
+- use the camera to understand what the user is looking at
+- research current places, products, hours, menus, reviews, and availability
+- surface sources in a cleaner, richer card layout
+- propose live verification or booking calls
+- place those calls through the cloud
+- brief the user afterward with a voice callback
+
+## Why Firecrawl Matters
+
+Firecrawl is not a side integration in Otto. It is the live retrieval layer that makes the product trustworthy.
+
+Otto uses Firecrawl when freshness and external grounding matter. That includes:
+
+- business discovery
+- websites and phone numbers
+- current location-based information
+- booking and reservation context
+- details that should be verifiable instead of guessed
+
+Firecrawl gives Otto:
+
+- real web results
+- page content that Gemini can reason over
+- source URLs and snippets for the user interface
+- evidence that can be attached to live call proposals
+
+That means Otto is not pretending to know the world from memory. It can go out, check, and come back with evidence.
+
+### Why this matters for hackathon judging
+
+From a hackathon perspective, Firecrawl is what allows Otto to move beyond a generic chat app:
+
+- it grounds answers in live data
+- it enables agentic decision-making with evidence
+- it supports both product discovery and real-world task execution
+- it gives the user transparent sources rather than opaque output
+
+## Why ElevenLabs Matters
+
+ElevenLabs is the voice identity of Otto.
+
+A lot of demos use one voice system in-app and a completely different speech path once telephony starts. Otto does not. The same voice layer powers:
+
+- spoken replies in the app
+- voice prompts during business calls
+- spoken callback briefings to the user
+
+That matters because Otto is not only a chat interface. It is a voice-present agent.
+
+ElevenLabs gives Otto:
+
+- more natural voice quality than default browser speech
+- a consistent brand voice across channels
+- reusable speech generation for app, call, and callback modes
+- a much stronger end-to-end feeling of "one assistant" instead of stitched-together tooling
+
+### Why this matters for hackathon judging
+
+From a demo and product perspective, ElevenLabs is what makes Otto feel alive:
+
+- the experience is more memorable
+- the callback flow feels premium instead of robotic
+- voice becomes part of the product, not just a fallback feature
+
+## Core Product Loop
+
+### 1. Fast conversational turns
+
+When the user says something lightweight like:
 
 - `hi`
 - `hello`
 - `thanks`
 - `okay`
-- short follow-ups that do not need live information
 
-Otto stays on the Gemini path and replies immediately without invoking Firecrawl.
+Otto does not unnecessarily trigger retrieval. Gemini handles those turns directly so the product feels fast and natural.
 
 ### 2. Retrieval-backed answers
 
-When the user asks for something current or externally verifiable, Otto escalates to Firecrawl and returns:
+When the user asks something current, local, or verifiable, Otto escalates to Firecrawl and returns:
 
 - a synthesized answer
-- supporting sources
+- source-backed context
 - structured follow-ups
-- optionally a live call proposal if phone verification would improve confidence
+- optional action links
+- optional call proposals when the web is not enough
 
-### 3. Cloud phone workflows
+### 3. Cloud call execution
 
-When a live call is useful, Otto can:
+When verification matters more than another web answer, Otto can:
 
 - create a call task
-- call the business from the cloud
-- speak through ElevenLabs audio
-- listen for spoken answers
+- speak to the target business
+- gather the answer
 - summarize the result
 - call the user back with a spoken briefing
+
+## Example Use Cases
+
+Otto was designed for tasks that sit between search and action.
+
+### Hospitality and reservations
+
+- check if a restaurant can seat 4 people tomorrow at 5 PM
+- verify whether vegetarian-only options are available
+- confirm opening hours before the user travels
+
+### Local decision-making
+
+- compare nearby options with ratings and quick source review
+- understand whether somewhere is worth visiting right now
+- get direction-oriented context from sourced results
+
+### Product and shopping discovery
+
+- surface multiple options cleanly from sourced results
+- show images and useful metadata when available
+- send the user directly to inspect or buy
+
+### Camera-assisted research
+
+- the user points the phone at an object, sign, menu, storefront, or place
+- Gemini interprets the scene
+- Firecrawl handles the live evidence layer if more context is needed
 
 ## Architecture
 
@@ -119,113 +229,47 @@ flowchart TD
     TW --> USER
 ```
 
-## Why Firecrawl Matters
+## System Roles
 
-Firecrawl is the retrieval layer of record in this project.
+- `Gemini` is the orchestration layer: intent interpretation, answer synthesis, and decision-making
+- `Firecrawl` is the live retrieval and evidence layer
+- `ElevenLabs` is the voice layer
+- `Twilio` is the telephony bridge
+- `Supabase` is the app backend for auth, profiles, tasks, approvals, and edge functions
 
-Otto uses Firecrawl when it needs fresh, external, reviewable evidence. That includes:
-
-- current business details
-- location-specific answers
-- phone or website discovery
-- booking and verification context
-- evidence snapshots stored alongside tasks
-
-### Firecrawl responsibilities
-
-- search the web for relevant current results
-- return page content Otto can synthesize against
-- provide URLs, snippets, and evidence for the UI
-- justify live call proposals with source-backed context
-- persist source snapshots on task records for later review
-
-### Firecrawl rules in this repo
-
-- Firecrawl is the only backend retrieval/search integration
-- Firecrawl is not used for lightweight conversational turns
-- call proposals should be grounded in plausible external evidence when the request depends on real-world data
-- source snapshots are persisted so the user can inspect what Otto relied on
-
-### Firecrawl entry point
-
-- [`supabase/functions/otto-analyze/index.ts`](./supabase/functions/otto-analyze/index.ts)
-
-This is where:
-
-- Gemini interprets the request
-- retrieval need is classified
-- Firecrawl queries are built and executed
-- Firecrawl evidence is normalized into user-facing and task-facing structures
-
-## Why ElevenLabs Matters
-
-ElevenLabs is the voice layer for Otto.
-
-It is not just a browser nicety. It is the single TTS pipeline across:
-
-- in-app assistant replies
-- business-call speech prompts
-- callback briefing speech
-
-That gives Otto one consistent voice system instead of fragmented browser speech in one place and telephony speech in another.
-
-### ElevenLabs responsibilities
-
-- generate MP3 audio for in-app Otto replies
-- generate audio for Twilio-hosted business call prompts
-- generate the spoken callback script after a task finishes
-- keep the app and phone workflow aligned on one voice stack
-
-### Voice modes
-
-The live voice function supports:
-
-- `app`
-- `call`
-- `callback`
-
-### ElevenLabs entry point
-
-- [`supabase/functions/otto-voice/index.ts`](./supabase/functions/otto-voice/index.ts)
-
-### Frontend voice entry point
-
-- [`src/features/otto/api/fetchOttoVoice.ts`](./src/features/otto/api/fetchOttoVoice.ts)
+That separation is intentional. It keeps Otto from becoming a vague "AI does everything" demo. Each system has a clear job.
 
 ## Request Lifecycle
 
-### In-app answer lifecycle
+### In-app answer
 
-1. User submits text, voice, and optionally a camera frame.
+1. The user sends text, voice, or an image-backed query.
 2. The frontend calls `otto-analyze`.
-3. Otto authenticates the session and loads the user profile.
-4. Gemini classifies the turn.
-5. If retrieval is needed, Firecrawl runs.
-6. Gemini synthesizes the reply from profile context, session context, and Firecrawl evidence.
-7. The UI renders the reply, sources, and any call proposal.
-8. The frontend requests `otto-voice` and plays the ElevenLabs reply.
+3. Gemini interprets the turn and decides whether Firecrawl is needed.
+4. Firecrawl runs only when live external information matters.
+5. Gemini synthesizes the answer using session context, profile context, vision context, and sourced evidence.
+6. The UI renders the answer, rich source cards, follow-ups, and any call proposal.
+7. `otto-voice` generates the ElevenLabs voice reply.
 
-### Call-task lifecycle
+### Cloud-call flow
 
-1. User approves a call proposal.
-2. The frontend calls `otto-call-task`.
-3. A task row and ordered step rows are inserted.
-4. `_shared/otto-concierge.ts` begins executing the task chain.
-5. Twilio places the business call.
-6. `otto-call-webhook` serves TwiML and processes speech turns.
-7. Gemini decides whether to continue asking, complete, or fail the business leg.
-8. The task is updated in Supabase.
-9. Otto waits briefly, then Twilio places the callback briefing.
-10. ElevenLabs generates the spoken callback audio.
+1. The user approves a live call proposal.
+2. `otto-call-task` creates the task and ordered steps.
+3. `_shared/otto-concierge.ts` executes the task chain.
+4. Twilio places the business call.
+5. `otto-call-webhook` serves TwiML and advances the conversation.
+6. Gemini interprets the business response.
+7. Otto stores the result and final summary.
+8. Otto calls the user back with an ElevenLabs-generated spoken briefing.
 
-## Supabase Functions
+## Key Functions
 
 ### `otto-analyze`
 
 Purpose:
 
-- authenticated turn orchestration
-- Gemini interpretation and answer synthesis
+- authenticated turn handling
+- Gemini orchestration
 - Firecrawl retrieval and source normalization
 - call proposal generation
 
@@ -237,7 +281,7 @@ Path:
 
 Purpose:
 
-- ElevenLabs TTS gateway for app, call, and callback audio
+- ElevenLabs voice generation for app, call, and callback modes
 
 Path:
 
@@ -247,9 +291,7 @@ Path:
 
 Purpose:
 
-- create the live cloud-call task
-- insert ordered steps
-- start execution
+- create and start live call tasks
 
 Path:
 
@@ -259,149 +301,60 @@ Path:
 
 Purpose:
 
-- receive Twilio webhooks
-- play ElevenLabs prompts
+- process Twilio webhooks
+- play voice prompts
 - gather speech
-- update call state
-- trigger callback progression
+- progress the live call flow
 
 Path:
 
 - [`supabase/functions/otto-call-webhook/index.ts`](./supabase/functions/otto-call-webhook/index.ts)
 
-### `otto-task-approval`
-
-Purpose:
-
-- resolve user approval state for queued steps
-
-Path:
-
-- [`supabase/functions/otto-task-approval/index.ts`](./supabase/functions/otto-task-approval/index.ts)
-
-### `otto-call-status`
-
-Purpose:
-
-- inspect Twilio call status for a task during live verification and debugging
-
-Path:
-
-- [`supabase/functions/otto-call-status/index.ts`](./supabase/functions/otto-call-status/index.ts)
-
-### Shared call runtime
+### Shared runtime
 
 Path:
 
 - [`supabase/functions/_shared/otto-concierge.ts`](./supabase/functions/_shared/otto-concierge.ts)
 
-This file contains the core cloud-call engine:
+This is the call engine that coordinates tasks, steps, call state, and callbacks.
 
-- auth helpers
-- profile loading
-- task fetching
-- Twilio call creation
-- callback delay handling
-- task-chain execution
-- conversation-log persistence
+## Frontend Highlights
 
-## Frontend Structure
+### Otto chat experience
 
-The frontend is intentionally split by product surface.
+- mobile-first chat UI
+- voice replies
+- camera capture and image attachment flow
+- expandable answer details
+- richer source cards with thumbnails and metadata when available
 
-### App shell
-
-- [`src/app/App.tsx`](./src/app/App.tsx)
-
-Handles:
-
-- session bootstrap
-- invalid-session recovery
-- auth and onboarding gating
-- tab navigation
-- fixed-layout behavior for the Otto screen
-
-### Otto experience
+Main screen:
 
 - [`src/features/otto/screens/OttoPage.tsx`](./src/features/otto/screens/OttoPage.tsx)
 
-Handles:
+### Voice
 
-- chat UI
-- input submission
-- mic flow
-- camera flow
-- voice playback
-- call approval entry
-
-Related Otto files:
-
-- [`src/features/otto/api/submitOttoTurn.ts`](./src/features/otto/api/submitOttoTurn.ts)
 - [`src/features/otto/api/fetchOttoVoice.ts`](./src/features/otto/api/fetchOttoVoice.ts)
-- [`src/features/otto/api/approveOttoTask.ts`](./src/features/otto/api/approveOttoTask.ts)
-- [`src/features/otto/hooks/useSpeechRecognition.ts`](./src/features/otto/hooks/useSpeechRecognition.ts)
-- [`src/features/otto/components/CallApprovalSheet.tsx`](./src/features/otto/components/CallApprovalSheet.tsx)
 
-### Tasks and approvals
+### Source-card presentation
 
-- [`src/features/tasks/components/TaskHistoryPanel.tsx`](./src/features/tasks/components/TaskHistoryPanel.tsx)
-- [`src/features/tasks/api/fetchInboxTasks.ts`](./src/features/tasks/api/fetchInboxTasks.ts)
-- [`src/features/tasks/api/resolveTaskApproval.ts`](./src/features/tasks/api/resolveTaskApproval.ts)
+- [`src/features/otto/components/SourceCard.tsx`](./src/features/otto/components/SourceCard.tsx)
 
-### Account and onboarding
+## Tech Stack
 
-- [`src/features/account/components/AccountPanel.tsx`](./src/features/account/components/AccountPanel.tsx)
-- [`src/features/account/components/ProfileForm.tsx`](./src/features/account/components/ProfileForm.tsx)
-- [`src/features/account/profile.ts`](./src/features/account/profile.ts)
-
-### Shared Supabase client and types
-
-- [`src/shared/supabase/client.ts`](./src/shared/supabase/client.ts)
-- [`src/shared/supabase/types.ts`](./src/shared/supabase/types.ts)
-
-## Data Model
-
-### `profiles`
-
-Stores:
-
-- user identity-adjacent profile data
-- callback phone
-- onboarding completion state
-- location/language defaults
-
-### `otto_tasks`
-
-Stores:
-
-- top-level task status
-- business target info
-- request query
-- result summary
-- source snapshot
-- conversation log
-- Twilio SIDs
-
-### `otto_task_steps`
-
-Stores ordered units of work.
-
-The live flow primarily uses:
-
-- `call_business`
-- `callback_user`
-
-### `otto_task_approvals`
-
-Stores:
-
-- pending approvals
-- approved/declined actions
-- resolution timestamps
+- `React`
+- `TypeScript`
+- `Vite`
+- `Supabase`
+- `Gemini`
+- `Firecrawl`
+- `ElevenLabs`
+- `Twilio`
+- `Framer Motion`
 
 ## Environment
 
-### Frontend env
+### Frontend
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
@@ -425,30 +378,19 @@ Stores:
 - `OTTO_WEBHOOK_SECRET`
 - `OTTO_CALLBACK_DELAY_MS`
 
-## Database Migrations
-
-Apply these in order on the linked Supabase project:
-
-- `supabase/migrations/202603210001_phase4_cloud_agent.sql`
-- `supabase/migrations/202603210002_concierge_inbox_email.sql`
-- `supabase/migrations/202603210003_callback_step_phase6.sql`
-- `supabase/migrations/202603210004_remove_email_integration.sql`
-
 ## Local Development
 
-Install dependencies:
+Install:
 
 ```bash
 npm install
 ```
 
-Run the app:
+Run:
 
 ```bash
 npm run dev
 ```
-
-## Validation
 
 Type-check:
 
@@ -457,40 +399,16 @@ npx tsc --noEmit -p tsconfig.app.json
 npx tsc --noEmit -p tsconfig.node.json
 ```
 
-Standard scripts:
+## Why Otto Stands Out
 
-```bash
-npm run lint
-npm run build
-npm test
-```
+Otto is not just a chatbot, not just a voice wrapper, and not just a call bot.
 
-Supabase functions:
+Its value is the combination:
 
-```bash
-supabase functions deploy otto-analyze --no-verify-jwt --project-ref <project-ref>
-supabase functions deploy otto-voice --no-verify-jwt --project-ref <project-ref>
-supabase functions deploy otto-call-task --no-verify-jwt --project-ref <project-ref>
-supabase functions deploy otto-call-webhook --no-verify-jwt --project-ref <project-ref>
-supabase functions deploy otto-task-approval --no-verify-jwt --project-ref <project-ref>
-supabase functions deploy otto-call-status --no-verify-jwt --project-ref <project-ref>
-```
+- Firecrawl makes it current
+- Gemini makes it intelligent
+- ElevenLabs makes it feel real
+- Twilio makes it actionable
+- Supabase makes it durable
 
-## Operational Notes
-
-- callback phone is required for cloud-call flows
-- conversational turns should stay on Gemini when retrieval is unnecessary
-- Firecrawl evidence is persisted with tasks so call decisions are reviewable
-- ElevenLabs is the intended voice path; browser speech is only a fallback when the app path fails
-- the callback leg currently supports a configurable delay through `OTTO_CALLBACK_DELAY_MS`
-- using the same number as both business line and callback target can still produce busy outcomes depending on carrier timing
-
-## Current Live Focus
-
-If you are changing this system, keep these priorities intact:
-
-1. Firecrawl remains the sole retrieval and evidence layer.
-2. ElevenLabs remains the shared voice pipeline across app and telephony.
-3. Gemini handles orchestration, not arbitrary side systems.
-4. Supabase task state must stay canonical and inspectable.
-5. Twilio webhooks must stay public and reliable for the cloud-call flow to work.
+That combination is what turns a hackathon demo into a believable product direction.
