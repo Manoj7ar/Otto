@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,15 +8,33 @@ const corsHeaders = {
 };
 
 const MAX_SESSION_TURNS = 8;
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GOOGLE_API_KEY");
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
 
 type ConfidenceLevel = "low" | "medium" | "high";
 type SearchMode = "none" | "search";
 type ActionType = "source" | "search" | "directions";
+type IntentKind = "answer" | "call_verification" | "call_booking";
 
 interface AnalyzeRequest {
   query?: string;
   imageBase64?: string;
   sessionContext?: unknown;
+}
+
+interface ProfileRow {
+  full_name: string | null;
+  home_location: string;
+  current_region: string;
+  language_code: string;
+  timezone: string;
+  travel_mode: string;
+  callback_phone: string | null;
+  call_briefing_enabled: boolean;
+  onboarding_completed_at: string | null;
 }
 
 interface Interpretation {
@@ -28,6 +47,8 @@ interface Interpretation {
   searchMode: SearchMode;
   searchQuery: string;
   detailHints: string[];
+  intentKind: IntentKind;
+  targetBusinessHint: string;
 }
 
 interface SearchSource {
@@ -49,6 +70,17 @@ interface OttoAction {
   type: ActionType;
 }
 
+interface OttoProposedTask {
+  taskType: "verification" | "booking";
+  businessName: string;
+  businessPhone: string | null;
+  businessWebsite: string | null;
+  callGoal: string;
+  approvalSummary: string;
+  approvedScope: string[];
+  questions: string[];
+}
+
 interface OttoReply {
   messageId: string;
   createdAt: string;
@@ -67,6 +99,7 @@ interface OttoReply {
     sourceType: string;
   }>;
   structuredDetails: StructuredDetail[];
+  proposedTask: OttoProposedTask | null;
 }
 
 interface OttoUserTurn {
@@ -112,10 +145,6 @@ class HttpError extends Error {
   }
 }
 
-const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GOOGLE_API_KEY");
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
-const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
-
 const interpretationSchema = {
   type: "OBJECT",
   properties: {
@@ -131,6 +160,8 @@ const interpretationSchema = {
       type: "ARRAY",
       items: { type: "STRING" },
     },
+    intentKind: { type: "STRING", enum: ["answer", "call_verification", "call_booking"] },
+    targetBusinessHint: { type: "STRING" },
   },
   required: [
     "subject",
@@ -142,6 +173,8 @@ const interpretationSchema = {
     "searchMode",
     "searchQuery",
     "detailHints",
+    "intentKind",
+    "targetBusinessHint",
   ],
 };
 
@@ -165,6 +198,35 @@ const synthesisSchema = {
       items: { type: "STRING" },
     },
     sessionSummary: { type: "STRING" },
+    proposedTask: {
+      type: "OBJECT",
+      properties: {
+        taskType: { type: "STRING", enum: ["verification", "booking"] },
+        businessName: { type: "STRING" },
+        businessPhone: { type: "STRING" },
+        businessWebsite: { type: "STRING" },
+        callGoal: { type: "STRING" },
+        approvalSummary: { type: "STRING" },
+        approvedScope: {
+          type: "ARRAY",
+          items: { type: "STRING" },
+        },
+        questions: {
+          type: "ARRAY",
+          items: { type: "STRING" },
+        },
+      },
+      required: [
+        "taskType",
+        "businessName",
+        "businessPhone",
+        "businessWebsite",
+        "callGoal",
+        "approvalSummary",
+        "approvedScope",
+        "questions",
+      ],
+    },
   },
   required: ["answer", "structuredDetails", "suggestedFollowUps", "sessionSummary"],
 };
@@ -204,13 +266,50 @@ function cleanBase64Image(imageBase64: string): string {
   return imageBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "").trim();
 }
 
+function normalizePhone(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.replace(/[^\d+]/g, "");
+  return normalized.length >= 7 ? normalized : null;
+}
+
 function shouldForceWebSearch(query: string) {
-  return /(review|rating|hours|open|closed|menu|price|website|address|directions|buy|compare|history|book|reserve|availability)/i
+  return /(review|rating|hours|open|closed|menu|price|website|address|directions|buy|compare|history|book|reserve|availability|phone|call)/i
     .test(query);
 }
 
 function generateId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function normalizeProposedTask(raw: unknown): OttoProposedTask | null {
+  const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : null;
+
+  if (!data) {
+    return null;
+  }
+
+  const taskType = data.taskType === "verification" || data.taskType === "booking" ? data.taskType : null;
+  const businessName = cleanText(data.businessName);
+  const callGoal = cleanText(data.callGoal);
+  const approvalSummary = cleanText(data.approvalSummary);
+
+  if (!taskType || !businessName || !callGoal || !approvalSummary) {
+    return null;
+  }
+
+  return {
+    taskType,
+    businessName,
+    businessPhone: normalizePhone(cleanText(data.businessPhone)) ?? cleanText(data.businessPhone) || null,
+    businessWebsite: cleanText(data.businessWebsite) || null,
+    callGoal,
+    approvalSummary,
+    approvedScope: cleanStringArray(data.approvedScope, 6),
+    questions: cleanStringArray(data.questions, 5),
+  };
 }
 
 function normalizeReply(raw: unknown): OttoReply | null {
@@ -294,6 +393,7 @@ function normalizeReply(raw: unknown): OttoReply | null {
     actions,
     sources,
     structuredDetails,
+    proposedTask: normalizeProposedTask(data.proposedTask),
   };
 }
 
@@ -361,6 +461,18 @@ function formatTurnHistory(turns: OttoConversationTurn[]) {
     .join("\n");
 }
 
+function buildProfileContext(profile: ProfileRow) {
+  return {
+    homeLocation: profile.home_location,
+    currentRegion: profile.current_region,
+    languageCode: profile.language_code,
+    timezone: profile.timezone,
+    travelMode: profile.travel_mode,
+    callbackPhone: profile.callback_phone,
+    callBriefingEnabled: profile.call_briefing_enabled,
+  };
+}
+
 function normalizeInterpretation(
   raw: unknown,
   fallbackQuery: string,
@@ -387,6 +499,9 @@ function normalizeInterpretation(
       : needsWebSearch
         ? "search"
         : "none";
+  const intentKind = data.intentKind === "call_verification" || data.intentKind === "call_booking"
+    ? data.intentKind
+    : "answer";
 
   return {
     subject: cleanText(data.subject, fallbackSubject),
@@ -401,6 +516,8 @@ function normalizeInterpretation(
     searchMode,
     searchQuery,
     detailHints: cleanStringArray(data.detailHints),
+    intentKind,
+    targetBusinessHint: cleanText(data.targetBusinessHint),
   };
 }
 
@@ -444,24 +561,27 @@ function buildSearchPlanQuery(
   interpretation: Interpretation,
   query: string,
   sessionContext: OttoSessionContext,
+  profile: ProfileRow,
 ) {
+  const regionHint = [profile.current_region, profile.home_location].filter(Boolean).join(" ");
+
   if (interpretation.searchQuery) {
-    return interpretation.searchQuery;
+    return `${interpretation.searchQuery} ${regionHint}`.trim();
   }
 
   if (sessionContext.activeSubject && query) {
-    return `${sessionContext.activeSubject} ${query}`;
+    return `${sessionContext.activeSubject} ${query} ${regionHint}`.trim();
   }
 
   if (query) {
-    return query;
+    return `${query} ${regionHint}`.trim();
   }
 
   if (sessionContext.activeSubject) {
-    return sessionContext.activeSubject;
+    return `${sessionContext.activeSubject} ${regionHint}`.trim();
   }
 
-  return interpretation.subject;
+  return `${interpretation.subject} ${regionHint}`.trim();
 }
 
 function buildSourceActions(subject: string, searchQuery: string, sources: SearchSource[]): OttoAction[] {
@@ -502,20 +622,22 @@ function normalizeSynthesis(
   usedWebSearch: boolean,
   sources: SearchSource[],
   sessionContext: OttoSessionContext,
+  profile: ProfileRow,
 ): { reply: OttoReply; sessionSummary: string } {
   const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
   const createdAt = new Date().toISOString();
   const messageId = generateId("msg");
+  const proposedTask = normalizeProposedTask(data.proposedTask);
   const answer = cleanText(
     data.answer,
-    usedWebSearch
-      ? "I found relevant information, but I could not confidently summarize it. Try narrowing the question."
-      : "I could interpret the scene, but I could not confidently produce a full answer. Try a more specific follow-up."
+    proposedTask
+      ? "I found a likely business target and prepared a call plan for your approval."
+      : usedWebSearch
+        ? "I found relevant information, but I could not confidently summarize it. Try narrowing the question."
+        : "I could interpret the scene, but I could not confidently produce a full answer. Try a more specific follow-up."
   );
 
-  const structuredDetails = (
-    Array.isArray(data.structuredDetails) ? data.structuredDetails : []
-  )
+  const cleanedStructuredDetails = (Array.isArray(data.structuredDetails) ? data.structuredDetails : [])
     .map((entry) => {
       const row = typeof entry === "object" && entry !== null ? entry as Record<string, unknown> : {};
       const label = cleanText(row.label);
@@ -530,15 +652,20 @@ function normalizeSynthesis(
     .filter((entry): entry is StructuredDetail => Boolean(entry))
     .slice(0, 6);
 
-  if (structuredDetails.length === 0 && interpretation.visualDescription) {
-    structuredDetails.push({
+  if (cleanedStructuredDetails.length === 0 && interpretation.visualDescription) {
+    cleanedStructuredDetails.push({
       label: usedVision ? "What Otto saw" : "Session context",
       value: usedVision ? interpretation.visualDescription : sessionContext.summary || query || interpretation.userIntent,
     });
   }
 
+  cleanedStructuredDetails.push({
+    label: "Profile context",
+    value: `${profile.current_region} | ${profile.travel_mode} | ${profile.timezone}`,
+  });
+
   if (sources.length > 0) {
-    structuredDetails.push({
+    cleanedStructuredDetails.push({
       label: "Web verification",
       value: `Checked ${sources.length} source${sources.length === 1 ? "" : "s"} for supporting details.`,
     });
@@ -562,7 +689,7 @@ function normalizeSynthesis(
       suggestedFollowUps: cleanStringArray(data.suggestedFollowUps, 4),
       actions: buildSourceActions(
         interpretation.subject,
-        buildSearchPlanQuery(interpretation, query, sessionContext),
+        buildSearchPlanQuery(interpretation, query, sessionContext, profile),
         sources,
       ),
       sources: sources.map(({ title, url, snippet, sourceType }) => ({
@@ -571,7 +698,8 @@ function normalizeSynthesis(
         snippet,
         sourceType,
       })),
-      structuredDetails: structuredDetails.slice(0, 6),
+      structuredDetails: cleanedStructuredDetails.slice(0, 6),
+      proposedTask,
     },
     sessionSummary,
   };
@@ -739,6 +867,53 @@ async function searchWithFirecrawl(query: string): Promise<SearchSource[]> {
   }
 }
 
+async function getAuthenticatedProfile(req: Request): Promise<ProfileRow> {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    throw new HttpError(500, "Supabase environment is not configured.");
+  }
+
+  const authHeader = req.headers.get("Authorization");
+
+  if (!authHeader) {
+    throw new HttpError(401, "Authentication required.");
+  }
+
+  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: {
+      headers: {
+        Authorization: authHeader,
+      },
+    },
+  });
+
+  const {
+    data: { user },
+    error: authError,
+  } = await client.auth.getUser();
+
+  if (authError || !user) {
+    throw new HttpError(401, "Invalid session.");
+  }
+
+  const { data: profile, error: profileError } = await client
+    .from("profiles")
+    .select(
+      "full_name, home_location, current_region, language_code, timezone, travel_mode, callback_phone, call_briefing_enabled, onboarding_completed_at",
+    )
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (profileError) {
+    throw new HttpError(500, "Failed to load profile.");
+  }
+
+  if (!profile?.onboarding_completed_at) {
+    throw new HttpError(403, "Complete onboarding before using Otto.");
+  }
+
+  return profile as ProfileRow;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -747,6 +922,7 @@ serve(async (req) => {
   const startedAt = performance.now();
 
   try {
+    const profile = await getAuthenticatedProfile(req);
     const { query = "", imageBase64, sessionContext: rawSessionContext }: AnalyzeRequest = await req.json();
     const trimmedQuery = query.trim();
     const cleanedImage = imageBase64 ? cleanBase64Image(imageBase64) : "";
@@ -761,11 +937,10 @@ serve(async (req) => {
     const interpretation = normalizeInterpretation(
       await callGemini<Interpretation>(
         [
-          "You are Otto, a mobile AI walking companion.",
-          "Interpret the current user turn using the current frame when available, plus the session context.",
-          "If the user asks a follow-up like hours, reviews, price, or directions, resolve it against the active session subject when possible.",
-          "Choose web retrieval only when external or fresh information is needed.",
-          "If the session already identifies the place or object, use that instead of inventing a new subject.",
+          "You are Otto, a mobile AI walking companion and task planner.",
+          "Interpret the current user turn using the current frame when available, plus session memory and the user's stored profile context.",
+          "If the user asks to call, verify, reserve, or book, classify the request as call_verification or call_booking.",
+          "Choose web retrieval when external, fresh, or contact information is needed.",
           "Keep subjectType short and human-readable.",
         ].join("\n"),
         [
@@ -780,6 +955,7 @@ serve(async (req) => {
           {
             text: JSON.stringify({
               currentQuery: trimmedQuery || "Interpret what I am looking at and continue the walk session.",
+              profile: buildProfileContext(profile),
               session: {
                 sessionId: sessionContext.sessionId,
                 activeSubject: sessionContext.activeSubject,
@@ -796,7 +972,7 @@ serve(async (req) => {
           },
         ],
         interpretationSchema,
-        1400,
+        1600,
       ),
       trimmedQuery,
       usedVision,
@@ -804,8 +980,10 @@ serve(async (req) => {
     );
 
     const searchStartedAt = performance.now();
-    const searchQuery = buildSearchPlanQuery(interpretation, trimmedQuery, sessionContext);
-    const shouldSearch = interpretation.searchMode === "search" && interpretation.needsWebSearch;
+    const searchQuery = buildSearchPlanQuery(interpretation, trimmedQuery, sessionContext, profile);
+    const shouldSearch =
+      interpretation.searchMode === "search" &&
+      (interpretation.needsWebSearch || interpretation.intentKind !== "answer");
     const sources = shouldSearch ? await searchWithFirecrawl(searchQuery) : [];
     const usedWebSearch = sources.length > 0;
 
@@ -816,13 +994,15 @@ serve(async (req) => {
         structuredDetails: StructuredDetail[];
         suggestedFollowUps: string[];
         sessionSummary: string;
+        proposedTask?: OttoProposedTask;
       }>(
         [
-          "You are Otto, a concise walking companion.",
-          "Answer the current turn using the current frame, session memory, and any retrieved web evidence.",
-          "Be direct and useful.",
-          "Do not claim web verification when sources are missing.",
-          "Do not invent hours, prices, ratings, names, or URLs.",
+          "You are Otto, a concise walking companion and cloud task planner.",
+          "Answer the current turn using the current frame, session memory, user profile defaults, and any retrieved web evidence.",
+          "If the user wants a phone call and you have enough confidence in the target business and number, return a proposedTask for explicit approval.",
+          "Only return proposedTask when there is a plausible phone number and business name.",
+          "approvedScope must be concrete and concise. Do not include payment collection.",
+          "Do not invent hours, prices, ratings, names, URLs, or phone numbers.",
           "Session summary should be a short memory string that helps the next follow-up resolve correctly.",
         ].join("\n"),
         [
@@ -830,6 +1010,7 @@ serve(async (req) => {
             text: JSON.stringify({
               currentQuery: trimmedQuery,
               interpretation,
+              profile: buildProfileContext(profile),
               session: {
                 activeSubject: sessionContext.activeSubject,
                 summary: sessionContext.summary,
@@ -846,7 +1027,7 @@ serve(async (req) => {
           },
         ],
         synthesisSchema,
-        1800,
+        2200,
       ),
       interpretation,
       trimmedQuery,
@@ -854,6 +1035,7 @@ serve(async (req) => {
       usedWebSearch,
       sources,
       sessionContext,
+      profile,
     );
 
     const updatedSessionContext = buildUpdatedSessionContext(
@@ -873,6 +1055,7 @@ serve(async (req) => {
       turnCount: updatedSessionContext.turns.length,
       usedVision,
       usedWebSearch,
+      intentKind: interpretation.intentKind,
       searchQuery,
     });
 
