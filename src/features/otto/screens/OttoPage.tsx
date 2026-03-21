@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { History, Paperclip, RotateCcw, X } from "lucide-react";
+import { ExternalLink, History, Paperclip, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import type { ProfileRow } from "@/features/account/profile";
 import { approveOttoTask } from "../api/approveOttoTask";
@@ -9,6 +9,7 @@ import { submitOttoTurn } from "../api/submitOttoTurn";
 import CallApprovalSheet from "../components/CallApprovalSheet";
 import CameraView, { type CameraViewHandle } from "../components/CameraView";
 import InputBar from "../components/InputBar";
+import SourceCard from "../components/SourceCard";
 import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
 import { createOttoSessionContext } from "../session";
 import type { OttoReplyData, OttoSessionContext } from "../types";
@@ -55,6 +56,26 @@ function formatBubbleTime(timestamp: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function MessageDisclosure({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="group mt-4 rounded-[1.2rem] border border-black/10 bg-white/20 open:bg-white/28">
+      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-medium uppercase tracking-[0.2em] text-secondary-otto">
+        <span>{label}</span>
+        <span className="text-[10px] transition-transform duration-200 group-open:rotate-45">+</span>
+      </summary>
+      <div className="border-t border-black/10 px-4 py-4 text-sm text-foreground/85">
+        {children}
+      </div>
+    </details>
+  );
 }
 
 export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPageProps) {
@@ -426,15 +447,92 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                           <div className="glass-panel mt-2 rounded-[1.8rem] rounded-bl-md px-5 py-4 text-sm leading-7 text-foreground">
                             <p>{turn.content}</p>
 
-                            {turn.reply.structuredDetails.length > 0 && turn.reply.subjectType !== "assistant" && (
-                              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                                {turn.reply.structuredDetails.slice(0, 4).map((detail) => (
-                                  <div key={`${detail.label}-${detail.value}`} className="rounded-[1.2rem] border border-black/10 bg-white/30 px-4 py-3">
-                                    <p className="text-[11px] uppercase tracking-[0.2em] text-secondary-otto">{detail.label}</p>
-                                    <p className="mt-2 text-sm leading-6 text-foreground/90">{detail.value}</p>
+                            {(turn.reply.structuredDetails.length > 0 || turn.reply.usedVision || turn.reply.usedWebSearch) && (
+                              <MessageDisclosure label="Context">
+                                <div className="space-y-4">
+                                  <div className="flex flex-wrap gap-2">
+                                    {turn.reply.usedVision && (
+                                      <span className="rounded-full border border-black/10 bg-white/30 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-secondary-otto">
+                                        Vision used
+                                      </span>
+                                    )}
+                                    {turn.reply.usedWebSearch && (
+                                      <span className="rounded-full border border-black/10 bg-white/30 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-secondary-otto">
+                                        Web search used
+                                      </span>
+                                    )}
                                   </div>
-                                ))}
-                              </div>
+
+                                  {turn.reply.structuredDetails.length > 0 && turn.reply.subjectType !== "assistant" && (
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                      {turn.reply.structuredDetails.slice(0, 4).map((detail) => (
+                                        <div key={`${detail.label}-${detail.value}`} className="rounded-[1.2rem] border border-black/10 bg-white/30 px-4 py-3">
+                                          <p className="text-[11px] uppercase tracking-[0.2em] text-secondary-otto">{detail.label}</p>
+                                          <p className="mt-2 text-sm leading-6 text-foreground/90">{detail.value}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </MessageDisclosure>
+                            )}
+
+                            {turn.reply.sources.length > 0 && (
+                              <MessageDisclosure label={`Sources (${turn.reply.sources.length})`}>
+                                <div className="space-y-3">
+                                  {turn.reply.sources.map((source) => (
+                                    <SourceCard key={source.url} source={source} />
+                                  ))}
+                                </div>
+                              </MessageDisclosure>
+                            )}
+
+                            {turn.reply.suggestedFollowUps.length > 0 && (
+                              <MessageDisclosure label="Follow Ups">
+                                <div className="flex flex-wrap gap-2">
+                                  {turn.reply.suggestedFollowUps.map((item) => (
+                                    <span key={item} className="rounded-full border border-black/10 bg-white/30 px-3 py-2 text-xs text-secondary-otto">
+                                      {item}
+                                    </span>
+                                  ))}
+                                </div>
+                              </MessageDisclosure>
+                            )}
+
+                            {turn.reply.actions.length > 0 && (
+                              <MessageDisclosure label="Actions">
+                                <div className="flex flex-wrap gap-3">
+                                  {turn.reply.actions.map((action, index) => {
+                                    const className = index === 0 ? "glass-button-primary" : "glass-button";
+
+                                    if (!action.url) {
+                                      return (
+                                        <button
+                                          key={`${action.type}-${action.label}`}
+                                          type="button"
+                                          className={`${className} rounded-full px-5 py-3 text-sm font-medium opacity-60`}
+                                          disabled
+                                        >
+                                          {action.label}
+                                        </button>
+                                      );
+                                    }
+
+                                    return (
+                                      <a
+                                        key={`${action.type}-${action.label}`}
+                                        href={action.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className={`${className} inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-medium`}
+                                      >
+                                        {action.label}
+                                        <ExternalLink size={14} />
+                                      </a>
+                                    );
+                                  })}
+                                </div>
+                              </MessageDisclosure>
                             )}
 
                             {latestReply?.messageId === turn.reply.messageId && canSpeak && (

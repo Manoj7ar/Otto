@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { ExternalLink, Eye, Globe, Mic2, MicOff, Phone, RotateCcw, Sparkles, Volume2, X } from "lucide-react";
+import SourceCard from "./SourceCard";
 import type { OttoReplyData, OttoSessionContext } from "../types";
 
 interface SessionDrawerProps {
@@ -226,26 +227,7 @@ export default function SessionDrawer({
                     {isLatestAssistantTurn && turn.reply.sources.length > 0 && (
                       <div className="space-y-3">
                         {turn.reply.sources.map((source) => (
-                          <a
-                            key={source.url}
-                            href={source.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="glass-panel block rounded-[1.5rem] px-4 py-4 transition-transform duration-200 hover:-translate-y-0.5"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="text-sm font-medium text-foreground">{source.title}</p>
-                                <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-secondary-otto">
-                                  {source.sourceType}
-                                </p>
-                              </div>
-                              <ExternalLink size={14} className="mt-1 shrink-0 text-primary" />
-                            </div>
-                            {source.snippet && (
-                              <p className="mt-3 text-sm leading-6 text-foreground/75">{source.snippet}</p>
-                            )}
-                          </a>
+                          <SourceCard key={source.url} source={source} />
                         ))}
                       </div>
                     )}

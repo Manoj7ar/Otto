@@ -3,6 +3,16 @@ export interface OttoSource {
   url: string;
   snippet: string;
   sourceType: string;
+  imageUrl?: string;
+  siteName?: string;
+  domain?: string;
+  meta?: {
+    rating?: string;
+    reviewCount?: string;
+    priceLabel?: string;
+    address?: string;
+    availabilityText?: string;
+  };
 }
 
 export interface OttoAction {

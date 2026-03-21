@@ -124,7 +124,7 @@ export default function InputBar({
           {hasContent && !isLiveMode && (
             <motion.button
               onClick={handleSend}
-              className="glass-button-primary absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-10 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full sm:static sm:bottom-auto sm:left-auto sm:z-auto sm:h-12 sm:w-12 sm:translate-x-0"
+              className="glass-button-primary absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-3 z-10 flex h-14 w-14 items-center justify-center rounded-full sm:static sm:bottom-auto sm:right-auto sm:z-auto sm:h-12 sm:w-12"
               whileTap={{ scale: 0.92 }}
               whileHover={{ scale: 1.03 }}
               initial={{ scale: 0, opacity: 0 }}

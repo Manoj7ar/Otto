@@ -58,6 +58,16 @@ interface SearchSource {
   snippet: string;
   sourceType: string;
   content: string;
+  imageUrl?: string;
+  siteName?: string;
+  domain?: string;
+  meta?: {
+    rating?: string;
+    reviewCount?: string;
+    priceLabel?: string;
+    address?: string;
+    availabilityText?: string;
+  };
 }
 
 interface StructuredDetail {
@@ -105,6 +115,16 @@ interface OttoReply {
     url: string;
     snippet: string;
     sourceType: string;
+    imageUrl?: string;
+    siteName?: string;
+    domain?: string;
+    meta?: {
+      rating?: string;
+      reviewCount?: string;
+      priceLabel?: string;
+      address?: string;
+      availabilityText?: string;
+    };
   }>;
   structuredDetails: StructuredDetail[];
   callProposal: OttoCallProposal | null;
@@ -383,6 +403,18 @@ function normalizeReply(raw: unknown): OttoReply | null {
           url,
           snippet: cleanText(source.snippet),
           sourceType: cleanText(source.sourceType, "web"),
+          imageUrl: cleanText(source.imageUrl) || undefined,
+          siteName: cleanText(source.siteName) || undefined,
+          domain: cleanText(source.domain) || undefined,
+          meta: typeof source.meta === "object" && source.meta !== null
+            ? {
+              rating: cleanText((source.meta as Record<string, unknown>).rating) || undefined,
+              reviewCount: cleanText((source.meta as Record<string, unknown>).reviewCount) || undefined,
+              priceLabel: cleanText((source.meta as Record<string, unknown>).priceLabel) || undefined,
+              address: cleanText((source.meta as Record<string, unknown>).address) || undefined,
+              availabilityText: cleanText((source.meta as Record<string, unknown>).availabilityText) || undefined,
+            }
+            : undefined,
         };
       })
       .filter((entry): entry is OttoReply["sources"][number] => Boolean(entry))
@@ -630,6 +662,174 @@ function buildSearchPlanQuery(
   return `${interpretation.subject} ${regionHint}`.trim();
 }
 
+function cleanDomain(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function cleanImageUrl(url: string, baseUrl: string) {
+  if (!url) {
+    return "";
+  }
+
+  try {
+    const resolved = new URL(url, baseUrl);
+
+    if (!/^https?:$/i.test(resolved.protocol)) {
+      return "";
+    }
+
+    return resolved.toString();
+  } catch {
+    return "";
+  }
+}
+
+function collapseWhitespace(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function decodeHtml(value: string) {
+  return value
+    .replaceAll("&amp;", "&")
+    .replaceAll("&quot;", "\"")
+    .replaceAll("&#39;", "'")
+    .replaceAll("&apos;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">");
+}
+
+function readMetaTag(html: string, key: string) {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`<meta[^>]+property=["']${escapedKey}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${escapedKey}["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+name=["']${escapedKey}["'][^>]+content=["']([^"']+)["'][^>]*>`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${escapedKey}["'][^>]*>`, "i"),
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+
+    if (match?.[1]) {
+      return decodeHtml(collapseWhitespace(match[1]));
+    }
+  }
+
+  return "";
+}
+
+function extractPattern(text: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+
+    if (match?.[1]) {
+      return collapseWhitespace(match[1]);
+    }
+  }
+
+  return "";
+}
+
+function inferSourceMeta(source: SearchSource) {
+  const text = collapseWhitespace(`${source.snippet} ${source.content}`);
+  const rating = extractPattern(text, [
+    /\b([0-5](?:\.\d)?)\s*(?:\/\s*5)?\s*(?:stars?|rating)\b/i,
+  ]);
+  const reviewCount = extractPattern(text, [
+    /\b([\d,.]+\s*(?:reviews?|ratings?))\b/i,
+  ]);
+  const priceLabel = extractPattern(text, [
+    /\b(price[:\s]+(?:[$€£]{1,4}|cheap|moderate|expensive|mid-range|budget)[^.,;]*)/i,
+    /\b((?:[$€£]{1,4})\s*(?:per person|pp|for two)?)\b/i,
+  ]);
+  const address = extractPattern(text, [
+    /\b(\d{1,5}[^.]{8,120}(?:street|st|road|rd|avenue|ave|boulevard|blvd|lane|ln|drive|dr|square|sq|way|place|pl|parkway|pkwy)[^.]{0,80})/i,
+  ]);
+  const availabilityText = extractPattern(text, [
+    /\b((?:in stock|out of stock|available now|limited stock|only \d+ left|sold out|open now|closed now))\b/i,
+  ]);
+  const meta = {
+    rating: rating || undefined,
+    reviewCount: reviewCount || undefined,
+    priceLabel: priceLabel || undefined,
+    address: address || undefined,
+    availabilityText: availabilityText || undefined,
+  };
+
+  return Object.values(meta).some(Boolean) ? meta : undefined;
+}
+
+async function fetchPageMetadata(source: SearchSource) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+
+  try {
+    const response = await fetch(source.url, {
+      headers: {
+        "User-Agent": "OttoBot/1.0 (+https://otto.local)",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get("content-type") ?? "";
+
+    if (!response.ok || !contentType.toLowerCase().includes("text/html")) {
+      return {};
+    }
+
+    const html = (await response.text()).slice(0, 120000);
+    const imageUrl = cleanImageUrl(
+      readMetaTag(html, "og:image") || readMetaTag(html, "twitter:image"),
+      source.url,
+    );
+    const siteName =
+      readMetaTag(html, "og:site_name") ||
+      readMetaTag(html, "application-name") ||
+      readMetaTag(html, "twitter:site");
+
+    return {
+      imageUrl: imageUrl || undefined,
+      siteName: siteName || undefined,
+    };
+  } catch {
+    return {};
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function enrichSource(source: SearchSource): Promise<SearchSource> {
+  const metadata = await fetchPageMetadata(source);
+
+  return {
+    ...source,
+    ...metadata,
+    domain: cleanDomain(source.url) || undefined,
+    meta: inferSourceMeta(source),
+  };
+}
+
+async function enrichSources(sources: SearchSource[]) {
+  const enriched = await Promise.allSettled(sources.map((source) => enrichSource(source)));
+
+  return enriched.map((result, index) => {
+    if (result.status === "fulfilled") {
+      return result.value;
+    }
+
+    return {
+      ...sources[index],
+      domain: cleanDomain(sources[index].url) || undefined,
+      meta: inferSourceMeta(sources[index]),
+    };
+  });
+}
+
 function dedupeSources(sources: SearchSource[]) {
   const seen = new Set<string>();
 
@@ -785,11 +985,15 @@ function normalizeSynthesis(
         buildSearchPlanQuery(interpretation, query, sessionContext, profile),
         sources,
       ),
-      sources: sources.map(({ title, url, snippet, sourceType }) => ({
+      sources: sources.map(({ title, url, snippet, sourceType, imageUrl, siteName, domain, meta }) => ({
         title,
         url,
         snippet,
         sourceType,
+        imageUrl,
+        siteName,
+        domain,
+        meta,
       })),
       structuredDetails: cleanedStructuredDetails.slice(0, 6),
       callProposal,
@@ -1017,7 +1221,8 @@ async function researchWithFirecrawl(
 ) {
   const queries = buildFirecrawlQueries(interpretation, searchQuery, profile);
   const results = await Promise.all(queries.map((query) => searchWithFirecrawl(query)));
-  return dedupeSources(results.flat()).slice(0, 6);
+  const deduped = dedupeSources(results.flat()).slice(0, 6);
+  return await enrichSources(deduped);
 }
 
 async function getAuthenticatedProfile(req: Request): Promise<ProfileRow> {

@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ExternalLink, Phone, ShieldCheck, X } from "lucide-react";
+import { Phone, ShieldCheck, X } from "lucide-react";
+import SourceCard from "./SourceCard";
 import type { OttoCallProposal } from "../types";
 
 interface CallApprovalSheetProps {
@@ -93,22 +94,7 @@ export default function CallApprovalSheet({
                   <p className="text-xs uppercase tracking-[0.2em] text-secondary-otto">Firecrawl evidence</p>
                   <div className="mt-3 space-y-3">
                     {proposal.firecrawlEvidence.map((source) => (
-                      <a
-                        key={source.url}
-                        href={source.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block rounded-2xl border border-border bg-white/30 px-4 py-3 transition-transform duration-200 hover:-translate-y-0.5"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-medium text-foreground">{source.title}</p>
-                            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-secondary-otto">{source.sourceType}</p>
-                          </div>
-                          <ExternalLink size={14} className="mt-1 shrink-0 text-primary" />
-                        </div>
-                        {source.snippet && <p className="mt-3 text-sm leading-6 text-foreground/75">{source.snippet}</p>}
-                      </a>
+                      <SourceCard key={source.url} source={source} />
                     ))}
                   </div>
                 </div>
