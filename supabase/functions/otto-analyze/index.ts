@@ -290,6 +290,21 @@ function shouldForceWebSearch(query: string) {
     .test(query);
 }
 
+function isConversationalTurn(query: string, usedVision: boolean) {
+  if (usedVision) {
+    return false;
+  }
+
+  const normalized = query.trim().toLowerCase();
+
+  if (!normalized) {
+    return false;
+  }
+
+  return /^(hi|hello|hey|yo|hiya|good morning|good afternoon|good evening|thanks|thank you|thank you so much|cool|great|nice|awesome|perfect|ok|okay|alright|sounds good|got it|understood|that helps|that helped|love it|bye|goodbye|see you)$/i
+    .test(normalized);
+}
+
 function generateId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
@@ -523,6 +538,7 @@ function normalizeInterpretation(
     typeof data.needsWebSearch === "boolean"
       ? data.needsWebSearch
       : shouldForceWebSearch(fallbackQuery);
+  const conversationalTurn = isConversationalTurn(fallbackQuery, usedVision);
   const searchMode =
     data.searchMode === "search" || data.searchMode === "none"
       ? data.searchMode
@@ -542,8 +558,8 @@ function normalizeInterpretation(
     ),
     userIntent: cleanText(data.userIntent, fallbackQuery || "Continue helping with the current walk."),
     confidence,
-    needsWebSearch: needsWebSearch || shouldForceWebSearch(fallbackQuery),
-    searchMode,
+    needsWebSearch: conversationalTurn ? false : needsWebSearch || shouldForceWebSearch(fallbackQuery),
+    searchMode: conversationalTurn ? "none" : searchMode,
     searchQuery,
     detailHints: cleanStringArray(data.detailHints),
     intentKind,
@@ -1086,6 +1102,8 @@ serve(async (req) => {
           "Use call_verification or call_booking when a live call would materially improve the outcome over research alone.",
           "Firecrawl is the only retrieval layer. There is no browser automation.",
           "Choose web retrieval when external, fresh, contact, or verification information is needed.",
+          "For greetings, thanks, acknowledgements, confirmations, and other lightweight conversational turns, do not request web search.",
+          "For lightweight conversational turns, answer directly from Gemini using session context and profile context only.",
           "Keep subjectType short and human-readable.",
         ].join("\n"),
         [
@@ -1144,6 +1162,7 @@ serve(async (req) => {
         [
           "You are Otto, a concise walking companion and cloud call planner.",
           "Answer the current turn using the current frame, session memory, user profile defaults, and Firecrawl evidence.",
+          "If there is no Firecrawl evidence and the turn is lightweight conversation, reply naturally and briefly without implying that research happened.",
           "If a call would help more than research alone, return a callProposal with the target, phone number, exact reason, and question list.",
           "Only return callProposal when the phone number is plausible from Firecrawl-backed evidence.",
           "followUpActions must only contain callback_user.",
