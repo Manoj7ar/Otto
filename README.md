@@ -1,4 +1,4 @@
-# Otto - An AI concierge powered by Firecrawl for real-time web research and evidence gathering, and ElevenLabs for natural voice replies, live call prompts, and callback briefings.
+# Otto -An AI concierge leveraging Firecrawl for real-time web research and evidence gathering, plus ElevenLabs for natural voice replies, live call prompts, and callback briefings.
 
 <p align="center">
   <img src="public/otter-readme.png" alt="Otto otter mark" width="320" />
