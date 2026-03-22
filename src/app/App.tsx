@@ -14,12 +14,9 @@ import {
 } from "@/features/account/profile";
 import OnboardingScreen from "@/features/onboarding/components/OnboardingScreen";
 import OttoPage from "@/features/otto/screens/OttoPage";
-import { fetchInboxTasks } from "@/features/tasks/api/fetchInboxTasks";
-import TaskHistoryPanel from "@/features/tasks/components/TaskHistoryPanel";
-import type { InboxTask } from "@/features/tasks/types";
 import { clearSupabaseBrowserSession, supabase } from "@/shared/supabase/client";
 
-type AppTab = "otto" | "tasks" | "account";
+type AppTab = "otto" | "account";
 
 function AppLoadingState() {
   return (
@@ -34,18 +31,15 @@ function AppLoadingState() {
 export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [profile, setProfile] = useState<ProfileRow | null>(null);
-  const [tasks, setTasks] = useState<InboxTask[]>([]);
   const [activeTab, setActiveTab] = useState<AppTab>("otto");
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
-  const [loadingTasks, setLoadingTasks] = useState(false);
   const installPrompt = useInstallPrompt();
 
   const resetInvalidSession = useCallback(async (message = "Your Otto session expired. Sign in again.") => {
     await clearSupabaseBrowserSession();
     setSession(null);
     setProfile(null);
-    setTasks([]);
     setActiveTab("otto");
     toast.error(message);
   }, []);
@@ -68,16 +62,6 @@ export default function App() {
       return data;
     } finally {
       setLoadingProfile(false);
-    }
-  }, []);
-
-  const loadTasks = useCallback(async (userId: string) => {
-    setLoadingTasks(true);
-
-    try {
-      setTasks(await fetchInboxTasks(userId));
-    } finally {
-      setLoadingTasks(false);
     }
   }, []);
 
@@ -114,7 +98,7 @@ export default function App() {
 
       if (data.session?.user.id) {
         try {
-          await Promise.all([loadProfile(data.session.user.id), loadTasks(data.session.user.id)]);
+          await loadProfile(data.session.user.id);
         } catch (loadError) {
           console.error("app_bootstrap_error", loadError);
           const message = loadError instanceof Error ? loadError.message : "Could not load the Otto cloud profile.";
@@ -136,7 +120,6 @@ export default function App() {
 
       if (!nextSession?.user.id) {
         setProfile(null);
-        setTasks([]);
         setActiveTab("otto");
         return;
       }
@@ -150,19 +133,13 @@ export default function App() {
 
         toast.error("Could not load the Otto cloud profile.");
       });
-      void loadTasks(nextSession.user.id).catch((error) => {
-        console.error("task_load_error", error);
-        if (error instanceof Error && /invalid jwt/i.test(error.message)) {
-          void resetInvalidSession("The Otto session became invalid and has been cleared. Sign in again.");
-        }
-      });
     });
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [loadProfile, loadTasks, resetInvalidSession]);
+  }, [loadProfile, resetInvalidSession]);
 
   const handleAuthSubmit = useCallback(async (mode: "sign_in" | "sign_up", email: string, password: string) => {
     const trimmedPassword = password.trim();
@@ -269,38 +246,9 @@ export default function App() {
     await clearSupabaseBrowserSession();
     setSession(null);
     setProfile(null);
-    setTasks([]);
     setActiveTab("otto");
     toast.success("Cleared the local Otto session.");
   }, []);
-
-  const handleRefreshTasks = useCallback(async () => {
-    if (!session?.user.id) {
-      return;
-    }
-
-    await loadTasks(session.user.id);
-  }, [loadTasks, session?.user.id]);
-
-  useEffect(() => {
-    if (activeTab !== "tasks" || !session?.user.id) {
-      return;
-    }
-
-    const hasActiveTasks = tasks.some((task) => task.inbox_state === "active" || task.inbox_state === "waiting_approval");
-
-    if (!hasActiveTasks) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void loadTasks(session.user.id).catch((error) => {
-        console.error("task_poll_error", error);
-      });
-    }, 10000);
-
-    return () => window.clearInterval(intervalId);
-  }, [activeTab, loadTasks, session?.user.id, tasks]);
 
   if (session === undefined || loadingProfile) {
     return (
@@ -356,8 +304,8 @@ export default function App() {
         >
           <header className="sticky top-0 z-40 bg-transparent">
             <div className="mx-auto flex max-w-5xl justify-center px-4 py-4">
-              <div className="glass grid w-full max-w-sm grid-cols-3 rounded-full p-1">
-                {(["tasks", "otto", "account"] as AppTab[]).map((tab) => (
+              <div className="glass grid w-full max-w-xs grid-cols-2 rounded-full p-1">
+                {(["otto", "account"] as AppTab[]).map((tab) => (
                   <button
                     key={tab}
                     type="button"
@@ -373,17 +321,7 @@ export default function App() {
             </div>
           </header>
 
-          {activeTab === "otto" && (
-            <OttoPage
-              profile={profile}
-              onOpenTasks={() => setActiveTab("tasks")}
-              onTaskCreated={handleRefreshTasks}
-            />
-          )}
-
-          {activeTab === "tasks" && (
-            <TaskHistoryPanel tasks={tasks} busy={loadingTasks} onRefresh={handleRefreshTasks} />
-          )}
+          {activeTab === "otto" && <OttoPage profile={profile} />}
 
           {activeTab === "account" && (
             <AccountPanel

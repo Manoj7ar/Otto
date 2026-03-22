@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ExternalLink, History, Paperclip, RotateCcw, X } from "lucide-react";
+import { ExternalLink, Paperclip, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import type { ProfileRow } from "@/features/account/profile";
 import { normalizeSpeechText } from "@/shared/speech/normalizeSpeechText";
-import { approveOttoTask } from "../api/approveOttoTask";
 import { fetchOttoVoice } from "../api/fetchOttoVoice";
 import { submitOttoTurn } from "../api/submitOttoTurn";
-import CallApprovalSheet from "../components/CallApprovalSheet";
 import CameraView, { type CameraViewHandle } from "../components/CameraView";
 import InputBar from "../components/InputBar";
 import SourceCard from "../components/SourceCard";
@@ -17,8 +15,6 @@ import type { OttoReplyData, OttoSessionContext } from "../types";
 
 interface OttoPageProps {
   profile: ProfileRow;
-  onOpenTasks: () => void;
-  onTaskCreated: () => Promise<void> | void;
 }
 
 function WavingOtterGreeting() {
@@ -97,34 +93,22 @@ function ThinkingBubble() {
   );
 }
 
-function isAffirmativeCallResponse(value: string) {
-  return /^(yes|yeah|yep|yup|sure|ok|okay|please do|go ahead|do it|make the call|call them|call them now|yes make the call|yes call|yes do it)\b/i
-    .test(value.trim());
-}
-
-function isNegativeCallResponse(value: string) {
-  return /^(no|nah|nope|not now|don't|do not|dont|no dont|no don't|skip it|not yet|cancel)\b/i
-    .test(value.trim());
-}
-
-export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPageProps) {
+export default function OttoPage({ profile }: OttoPageProps) {
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [cameraStatus, setCameraStatus] = useState<"idle" | "requesting" | "ready" | "denied" | "unavailable">("idle");
   const [capturedImageBase64, setCapturedImageBase64] = useState<string | null>(null);
   const [flashCount, setFlashCount] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [approvalVisible, setApprovalVisible] = useState(false);
   const [latestReply, setLatestReply] = useState<OttoReplyData | null>(null);
   const [sessionContext, setSessionContext] = useState<OttoSessionContext>(() => createOttoSessionContext());
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [latestQuery, setLatestQuery] = useState("");
-  const [approvingTask, setApprovingTask] = useState(false);
   const cameraRef = useRef<CameraViewHandle>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
-  const liveAgentPaused = isProcessing || isSpeaking || approvalVisible || approvingTask || cameraEnabled;
+  const liveAgentPaused = isProcessing || isSpeaking || cameraEnabled;
 
   const {
     isListening,
@@ -232,12 +216,6 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
   }, [isMuted, latestReply, speakResponse]);
 
   useEffect(() => {
-    if (latestReply?.callProposal) {
-      setApprovalVisible(true);
-    }
-  }, [latestReply]);
-
-  useEffect(() => {
     const viewport = scrollViewportRef.current;
 
     if (!viewport) {
@@ -272,110 +250,12 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
     setCapturedImageBase64(null);
   }, []);
 
-  const appendLocalAssistantTurn = useCallback((userText: string, assistantText: string) => {
-    const createdAt = new Date().toISOString();
-    const userTurn = {
-      id:
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `turn-${Date.now()}`,
-      role: "user" as const,
-      content: userText,
-      createdAt,
-      usedVision: false,
-    };
-    const reply: OttoReplyData = {
-      messageId:
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `msg-${Date.now()}`,
-      createdAt,
-      subject: latestReply?.subject ?? sessionContext.activeSubject ?? "Otto",
-      subjectType: latestReply?.subjectType ?? sessionContext.activeSubjectType ?? "assistant",
-      answer: assistantText,
-      confidence: "high",
-      usedVision: false,
-      usedWebSearch: false,
-      suggestedFollowUps: [],
-      actions: [],
-      sources: [],
-      structuredDetails: [],
-      callProposal: null,
-    };
-    const assistantTurn = {
-      id: reply.messageId,
-      role: "assistant" as const,
-      content: assistantText,
-      createdAt,
-      usedVision: false,
-      usedWebSearch: false,
-      reply,
-    };
-
-    setLatestReply(reply);
-    setSessionContext((current) => ({
-      ...current,
-      activeSubject: reply.subject,
-      activeSubjectType: reply.subjectType,
-      summary: assistantText,
-      turns: [...current.turns, userTurn, assistantTurn].slice(-8),
-    }));
-  }, [latestReply, sessionContext.activeSubject, sessionContext.activeSubjectType]);
-
-  const startCallTask = useCallback(async () => {
-    if (!latestReply?.callProposal) {
-      return false;
-    }
-
-    if (!profile.callback_phone) {
-      toast.error("Add a callback phone number in your profile before starting cloud calls.");
-      return false;
-    }
-
-    setApprovingTask(true);
-
-    try {
-      await approveOttoTask(latestQuery, latestReply.subject, latestReply.callProposal);
-      await onTaskCreated();
-      setApprovalVisible(false);
-      toast.success("Cloud call started. You can leave the app.");
-      onOpenTasks();
-      return true;
-    } catch (error) {
-      console.error("otto_task_approval_error", error);
-      toast.error(error instanceof Error ? error.message : "Could not start the cloud call.");
-      return false;
-    } finally {
-      setApprovingTask(false);
-    }
-  }, [latestQuery, latestReply, onOpenTasks, onTaskCreated, profile.callback_phone]);
-
   const handleSubmit = useCallback(
     async (text: string, imageOverride?: string) => {
       const query = text.trim();
 
       if (!query) {
         return;
-      }
-
-      if (!imageOverride && latestReply?.callProposal && approvalVisible) {
-        if (isAffirmativeCallResponse(query)) {
-          stopSpeaking();
-          const started = await startCallTask();
-
-          if (started) {
-            appendLocalAssistantTurn(query, "Starting the call now. I'll check and update you in Tasks.");
-          }
-
-          return;
-        }
-
-        if (isNegativeCallResponse(query)) {
-          stopSpeaking();
-          setApprovalVisible(false);
-          appendLocalAssistantTurn(query, "Okay, I won't make the call.");
-          return;
-        }
       }
 
       stopSpeaking();
@@ -412,7 +292,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
         setIsProcessing(false);
       }
     },
-    [appendLocalAssistantTurn, approvalVisible, cameraEnabled, capturedImageBase64, latestReply?.callProposal, resetTranscript, sessionContext, startCallTask, stopSpeaking]
+    [cameraEnabled, capturedImageBase64, resetTranscript, sessionContext, stopSpeaking]
   );
 
   const handleMicToggle = useCallback(
@@ -455,15 +335,10 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
     setCapturedImageBase64(null);
     setCameraEnabled(false);
     setLatestReply(null);
-    setApprovalVisible(false);
     setLatestQuery("");
     setSessionContext(createOttoSessionContext());
     toast.success("Walk session reset.");
   }, [resetTranscript, stopListening, stopSpeaking]);
-
-  const handleApproveTask = useCallback(async () => {
-    await startCallTask();
-  }, [startCallTask]);
 
   const showGreeting = !cameraEnabled && !hasSessionTurns && !isProcessing;
   const capturedPreviewUrl = capturedImageBase64 ? `data:image/jpeg;base64,${capturedImageBase64}` : null;
@@ -504,25 +379,15 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
 
       {!cameraEnabled && (
         <div className="mx-auto flex h-full w-full max-w-5xl flex-1 flex-col overflow-hidden px-3 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-[calc(7rem+env(safe-area-inset-bottom))] sm:pt-6">
-          <div className="mb-3 flex items-center justify-end gap-3 sm:mb-5">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onOpenTasks}
-                className="glass-button inline-flex h-10 w-10 items-center justify-center rounded-full sm:h-11 sm:w-11"
-                aria-label="Open tasks"
-              >
-                <History size={16} />
-              </button>
-              <button
-                type="button"
-                onClick={handleResetSession}
-                className="glass-button inline-flex h-10 w-10 items-center justify-center rounded-full sm:h-11 sm:w-11"
-                aria-label="Reset session"
-              >
-                <RotateCcw size={16} />
-              </button>
-            </div>
+          <div className="mb-3 flex items-center justify-end sm:mb-5">
+            <button
+              type="button"
+              onClick={handleResetSession}
+              className="glass-button inline-flex h-10 w-10 items-center justify-center rounded-full sm:h-11 sm:w-11"
+              aria-label="Reset session"
+            >
+              <RotateCcw size={16} />
+            </button>
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -702,14 +567,6 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
           </div>
         </div>
       )}
-
-      <CallApprovalSheet
-        proposal={latestReply?.callProposal ?? null}
-        visible={approvalVisible}
-        busy={approvingTask}
-        onApprove={handleApproveTask}
-        onClose={() => setApprovalVisible(false)}
-      />
 
       <AnimatePresence>
         {!cameraEnabled && capturedImageBase64 && !isProcessing && (

@@ -17,8 +17,6 @@ const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
 type ConfidenceLevel = "low" | "medium" | "high";
 type SearchMode = "none" | "search";
 type ActionType = "source" | "search" | "directions";
-type IntentKind = "answer" | "call_verification" | "call_booking";
-type FollowUpAction = "callback_user";
 
 interface AnalyzeRequest {
   query?: string;
@@ -33,8 +31,6 @@ interface ProfileRow {
   language_code: string;
   timezone: string;
   travel_mode: string;
-  callback_phone: string | null;
-  call_briefing_enabled: boolean;
   onboarding_completed_at: string | null;
 }
 
@@ -48,8 +44,6 @@ interface Interpretation {
   searchMode: SearchMode;
   searchQuery: string;
   detailHints: string[];
-  intentKind: IntentKind;
-  targetBusinessHint: string;
 }
 
 interface SearchSource {
@@ -81,24 +75,6 @@ interface OttoAction {
   type: ActionType;
 }
 
-interface OttoCallProposal {
-  callType: "verification" | "booking";
-  title: string;
-  summary: string;
-  callReason: string;
-  callTargetName: string;
-  callTargetPhone: string;
-  callTargetEmail: string | null;
-  firecrawlEvidence: Array<{
-    title: string;
-    url: string;
-    snippet: string;
-    sourceType: string;
-  }>;
-  callQuestions: string[];
-  followUpActions: FollowUpAction[];
-}
-
 interface OttoReply {
   messageId: string;
   createdAt: string;
@@ -127,7 +103,6 @@ interface OttoReply {
     };
   }>;
   structuredDetails: StructuredDetail[];
-  callProposal: OttoCallProposal | null;
 }
 
 interface OttoUserTurn {
@@ -188,8 +163,6 @@ const interpretationSchema = {
       type: "ARRAY",
       items: { type: "STRING" },
     },
-    intentKind: { type: "STRING", enum: ["answer", "call_verification", "call_booking"] },
-    targetBusinessHint: { type: "STRING" },
   },
   required: [
     "subject",
@@ -201,8 +174,6 @@ const interpretationSchema = {
     "searchMode",
     "searchQuery",
     "detailHints",
-    "intentKind",
-    "targetBusinessHint",
   ],
 };
 
@@ -226,37 +197,6 @@ const synthesisSchema = {
       items: { type: "STRING" },
     },
     sessionSummary: { type: "STRING" },
-    callProposal: {
-      type: "OBJECT",
-      properties: {
-        callType: { type: "STRING", enum: ["verification", "booking"] },
-        title: { type: "STRING" },
-        summary: { type: "STRING" },
-        callReason: { type: "STRING" },
-        callTargetName: { type: "STRING" },
-        callTargetPhone: { type: "STRING" },
-        callTargetEmail: { type: "STRING" },
-        callQuestions: {
-          type: "ARRAY",
-          items: { type: "STRING" },
-        },
-        followUpActions: {
-          type: "ARRAY",
-          items: { type: "STRING", enum: ["callback_user"] },
-        },
-      },
-      required: [
-        "callType",
-        "title",
-        "summary",
-        "callReason",
-        "callTargetName",
-        "callTargetPhone",
-        "callTargetEmail",
-        "callQuestions",
-        "followUpActions",
-      ],
-    },
   },
   required: ["answer", "structuredDetails", "suggestedFollowUps", "sessionSummary"],
 };
@@ -296,22 +236,9 @@ function cleanBase64Image(imageBase64: string): string {
   return imageBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "").trim();
 }
 
-function normalizePhone(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const normalized = value.replace(/[^\d+]/g, "");
-  return normalized.length >= 7 ? normalized : null;
-}
-
 function shouldForceWebSearch(query: string) {
-  return /(review|rating|hours|open|closed|menu|price|website|address|directions|buy|compare|history|book|reserve|availability|phone|call)/i
+  return /(review|rating|hours|open|closed|menu|price|website|address|directions|buy|compare|history|book|reserve|availability|phone|nearby|cheaper|alternative)/i
     .test(query);
-}
-
-function userExplicitlyRequestedCall(query: string) {
-  return /\bcall\b/i.test(query);
 }
 
 function isConversationalTurn(query: string, usedVision: boolean) {
@@ -331,54 +258,6 @@ function isConversationalTurn(query: string, usedVision: boolean) {
 
 function generateId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
-}
-
-function normalizeCallProposal(raw: unknown, sources: SearchSource[], profile: ProfileRow): OttoCallProposal | null {
-  const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : null;
-
-  if (!data || sources.length === 0) {
-    return null;
-  }
-
-  const callType =
-    data.callType === "verification" || data.callType === "booking"
-      ? data.callType
-      : null;
-  const title = cleanText(data.title);
-  const summary = cleanText(data.summary);
-  const callReason = cleanText(data.callReason);
-  const callTargetName = cleanText(data.callTargetName);
-  const callTargetPhone = normalizePhone(cleanText(data.callTargetPhone));
-  const requestedFollowUps = cleanStringArray(data.followUpActions, 3)
-    .filter((entry): entry is FollowUpAction => entry === "callback_user");
-  const followUpActions = Array.from(
-    new Set<FollowUpAction>([
-      profile.callback_phone ? "callback_user" : requestedFollowUps[0] ?? "callback_user",
-      ...requestedFollowUps,
-    ]),
-  );
-
-  if (!callType || !title || !summary || !callReason || !callTargetName || !callTargetPhone) {
-    return null;
-  }
-
-  return {
-    callType,
-    title,
-    summary,
-    callReason,
-    callTargetName,
-    callTargetPhone,
-    callTargetEmail: cleanText(data.callTargetEmail) || null,
-    firecrawlEvidence: sources.slice(0, 3).map(({ title, url, snippet, sourceType }) => ({
-      title,
-      url,
-      snippet,
-      sourceType,
-    })),
-    callQuestions: cleanStringArray(data.callQuestions, 6),
-    followUpActions,
-  };
 }
 
 function normalizeReply(raw: unknown): OttoReply | null {
@@ -474,7 +353,6 @@ function normalizeReply(raw: unknown): OttoReply | null {
     actions,
     sources,
     structuredDetails,
-    callProposal: data.callProposal as OttoCallProposal | null,
   };
 }
 
@@ -549,8 +427,6 @@ function buildProfileContext(profile: ProfileRow) {
     languageCode: profile.language_code,
     timezone: profile.timezone,
     travelMode: profile.travel_mode,
-    callbackPhone: profile.callback_phone,
-    callBriefingEnabled: true,
   };
 }
 
@@ -575,21 +451,12 @@ function normalizeInterpretation(
       ? data.needsWebSearch
       : shouldForceWebSearch(fallbackQuery);
   const conversationalTurn = isConversationalTurn(fallbackQuery, usedVision);
-  const explicitCallRequest = userExplicitlyRequestedCall(fallbackQuery);
   const searchMode =
     data.searchMode === "search" || data.searchMode === "none"
       ? data.searchMode
-      : needsWebSearch || explicitCallRequest
+      : needsWebSearch
         ? "search"
         : "none";
-  const inferredIntentKind = data.intentKind === "call_verification" || data.intentKind === "call_booking"
-    ? data.intentKind
-    : explicitCallRequest
-      ? "call_verification"
-      : "answer";
-  const intentKind = explicitCallRequest
-    ? inferredIntentKind
-    : "answer";
 
   return {
     subject: cleanText(data.subject, fallbackSubject),
@@ -600,12 +467,10 @@ function normalizeInterpretation(
     ),
     userIntent: cleanText(data.userIntent, fallbackQuery || "Continue helping with the current walk."),
     confidence,
-    needsWebSearch: conversationalTurn ? false : needsWebSearch || shouldForceWebSearch(fallbackQuery) || explicitCallRequest,
-    searchMode: conversationalTurn ? "none" : (searchMode === "none" && explicitCallRequest ? "search" : searchMode),
+    needsWebSearch: conversationalTurn ? false : needsWebSearch || shouldForceWebSearch(fallbackQuery),
+    searchMode: conversationalTurn ? "none" : searchMode,
     searchQuery,
     detailHints: cleanStringArray(data.detailHints),
-    intentKind,
-    targetBusinessHint: cleanText(data.targetBusinessHint, sessionContext.activeSubject || fallbackSubject),
   };
 }
 
@@ -860,9 +725,12 @@ function buildFirecrawlQueries(
 ) {
   const queries = [searchQuery];
 
-  if (interpretation.intentKind !== "answer") {
-    queries.push(`${interpretation.targetBusinessHint || interpretation.subject} phone contact ${profile.current_region}`.trim());
-    queries.push(`${interpretation.targetBusinessHint || interpretation.subject} official site phone ${profile.current_region}`.trim());
+  if (interpretation.subject && interpretation.subject !== searchQuery) {
+    queries.push(`${interpretation.subject} ${profile.current_region}`.trim());
+  }
+
+  if (/(price|cost|cheaper|alternative|compare|nearby|online)/i.test(searchQuery)) {
+    queries.push(`${interpretation.subject || searchQuery} price compare nearby online`.trim());
   }
 
   return Array.from(new Set(queries.filter(Boolean))).slice(0, 3);
@@ -898,16 +766,6 @@ function buildSourceActions(subject: string, searchQuery: string, sources: Searc
   return actions.slice(0, 3);
 }
 
-function ensureCallPrompt(answer: string, proposal: OttoCallProposal | null, allowCallPrompt: boolean) {
-  if (!proposal || !allowCallPrompt) {
-    return answer;
-  }
-
-  return /do you want me to make a call and check\?/i.test(answer)
-    ? answer
-    : `${answer} Do you want me to make a call and check?`;
-}
-
 function isSimpleGreeting(query: string, usedVision: boolean) {
   if (usedVision) {
     return false;
@@ -930,16 +788,12 @@ function normalizeSynthesis(
   const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
   const createdAt = new Date().toISOString();
   const messageId = generateId("msg");
-  const explicitCallRequest = userExplicitlyRequestedCall(query);
-  const callProposal = explicitCallRequest ? normalizeCallProposal(data.callProposal, sources, profile) : null;
-  const answer = ensureCallPrompt(cleanText(
+  const answer = cleanText(
     data.answer,
-    callProposal
-      ? `I found enough Firecrawl evidence to call ${callProposal.callTargetName} and verify this for you.`
-      : usedWebSearch
-        ? "I found relevant information, but I could not confidently summarize it. Try narrowing the question."
-        : "I could interpret the scene, but I could not confidently produce a full answer. Try a more specific follow-up."
-  ), callProposal, explicitCallRequest);
+    usedWebSearch
+      ? "I found relevant information, but I could not confidently summarize it. Try narrowing the question."
+      : "I could interpret the scene, but I could not confidently produce a full answer. Try a more specific follow-up."
+  );
 
   const cleanedStructuredDetails = (Array.isArray(data.structuredDetails) ? data.structuredDetails : [])
     .map((entry) => {
@@ -1007,7 +861,6 @@ function normalizeSynthesis(
         meta,
       })),
       structuredDetails: cleanedStructuredDetails.slice(0, 6),
-      callProposal,
     },
     sessionSummary,
   };
@@ -1054,20 +907,20 @@ function buildGreetingResponse(
   profile: ProfileRow,
 ): OttoTurnResponse {
   const createdAt = new Date().toISOString();
-  const greetingText = `Hello ${profile.full_name || "there"}. I'm ready. You can ask about what you're looking at, or I can use Firecrawl research and make a cloud call if needed.`;
+  const greetingText = `Hello ${profile.full_name || "there"}. I'm ready. Ask about what you're looking at, what something costs, or where to find better options nearby or online.`;
   const reply: OttoReply = {
     messageId: generateId("msg"),
     createdAt,
     subject: "Otto",
     subjectType: "assistant",
-    answer: `Hello ${profile.full_name || "there"}. I’m ready. You can ask about what you’re looking at, or I can use Firecrawl research and make a cloud call if needed.`,
+    answer: greetingText,
     confidence: "high",
     usedVision: false,
     usedWebSearch: false,
     suggestedFollowUps: [
       "What am I looking at?",
-      "Can you verify this by calling?",
-      "Find more information about this",
+      "How much does this cost?",
+      "Find cheaper alternatives nearby",
     ],
     actions: [],
     sources: [],
@@ -1077,11 +930,10 @@ function buildGreetingResponse(
         value: "Otto is online and waiting for your next question.",
       },
       {
-        label: "Cloud workflow",
-        value: "If a live call would help, Otto can run it in the cloud and call you back with the result.",
+        label: "What Otto can do",
+        value: "Use the camera, session context, and web research to identify things, compare prices, and find relevant options.",
       },
     ],
-    callProposal: null,
   };
   reply.answer = greetingText;
 
@@ -1267,7 +1119,7 @@ async function getAuthenticatedProfile(req: Request): Promise<ProfileRow> {
   const { data: profile, error: profileError } = await client
     .from("profiles")
     .select(
-      "full_name, home_location, current_region, language_code, timezone, travel_mode, callback_phone, call_briefing_enabled, onboarding_completed_at",
+      "full_name, home_location, current_region, language_code, timezone, travel_mode, onboarding_completed_at",
     )
     .eq("id", user.id)
     .maybeSingle();
@@ -1313,14 +1165,12 @@ serve(async (req) => {
     const interpretation = normalizeInterpretation(
       await callGemini<Interpretation>(
         [
-          "You are Otto, a mobile AI walking companion and cloud call planner.",
+          "You are Otto, a mobile AI for the physical world.",
           "Interpret the current user turn using the current frame when available, plus session memory and the user's stored profile context.",
-          "Use call_verification or call_booking only when the current user query explicitly asks for a call.",
-          "If the query does not explicitly contain the word 'call', do not choose a call intent just because the topic is restaurants, hotels, bookings, or another live business question.",
-          "Firecrawl is the only retrieval layer. There is no browser automation.",
-          "Choose web retrieval when external, fresh, contact, or verification information is needed.",
+          "This product focuses on seeing, understanding, researching, comparing, and finding relevant real-world options.",
+          "Firecrawl is the only retrieval layer. There is no browser automation or external agent workflow.",
+          "Choose web retrieval when external, fresh, nearby, price, availability, or comparison information is needed.",
           "For greetings, thanks, acknowledgements, confirmations, and other lightweight conversational turns, do not request web search.",
-          "For lightweight conversational turns, answer directly from Gemini using session context and profile context only.",
           "Keep subjectType short and human-readable.",
         ].join("\n"),
         [
@@ -1334,7 +1184,7 @@ serve(async (req) => {
             : []),
           {
             text: JSON.stringify({
-              currentQuery: trimmedQuery || "Interpret what I am looking at and continue the walk session.",
+              currentQuery: trimmedQuery || "Interpret what I am looking at and continue the session.",
               profile: buildProfileContext(profile),
               session: {
                 sessionId: sessionContext.sessionId,
@@ -1363,7 +1213,7 @@ serve(async (req) => {
     const searchQuery = buildSearchPlanQuery(interpretation, trimmedQuery, sessionContext, profile);
     const shouldSearch =
       interpretation.searchMode === "search" &&
-      (interpretation.needsWebSearch || interpretation.intentKind !== "answer");
+      interpretation.needsWebSearch;
     const sources = shouldSearch ? await researchWithFirecrawl(interpretation, searchQuery, profile) : [];
     const usedWebSearch = sources.length > 0;
 
@@ -1374,18 +1224,13 @@ serve(async (req) => {
         structuredDetails: StructuredDetail[];
         suggestedFollowUps: string[];
         sessionSummary: string;
-        callProposal?: OttoCallProposal;
       }>(
         [
-          "You are Otto, a concise walking companion and cloud call planner.",
+          "You are Otto, a concise physical-world assistant.",
           "Answer the current turn using the current frame, session memory, user profile defaults, and Firecrawl evidence.",
           "If there is no Firecrawl evidence and the turn is lightweight conversation, reply naturally and briefly without implying that research happened.",
-          "Return a callProposal only when the current user query explicitly contains the word 'call'.",
-          "If the query does not explicitly contain the word 'call', do not return a callProposal even for restaurants, hotels, bookings, or image-led place questions.",
-          "When you return a callProposal, your answer should naturally lead into asking whether Otto should make the call and check.",
-          "Only return callProposal when the phone number is plausible from Firecrawl-backed evidence.",
-          "followUpActions must only contain callback_user.",
-          "There is no browser automation.",
+          "Focus on identifying things, clarifying context, finding prices, comparing alternatives, and helping the user decide what to do next.",
+          "There is no browser automation or external agent workflow.",
           "Do not invent hours, prices, ratings, names, URLs, or phone numbers.",
           "Session summary should be a short memory string that helps the next follow-up resolve correctly.",
         ].join("\n"),
@@ -1439,7 +1284,6 @@ serve(async (req) => {
       turnCount: updatedSessionContext.turns.length,
       usedVision,
       usedWebSearch,
-      intentKind: interpretation.intentKind,
       searchQuery,
     });
 
@@ -1463,3 +1307,4 @@ serve(async (req) => {
     );
   }
 });
+

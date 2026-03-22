@@ -1,7 +1,7 @@
 {
   "name": "Otto",
   "short_name": "Otto",
-  "description": "Otto is a mobile AI concierge powered by Firecrawl, ElevenLabs, Supabase, and Twilio.",
+  "description": "Otto is a mobile AI for your physical world, powered by Gemini, Firecrawl, ElevenLabs, and Supabase.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

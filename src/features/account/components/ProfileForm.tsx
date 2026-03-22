@@ -117,23 +117,6 @@ export default function ProfileForm({
           </select>
         </label>
 
-        <label className="glass-panel rounded-3xl p-4">
-          <span className="text-xs uppercase tracking-[0.2em] text-secondary-otto">Callback phone</span>
-          <input
-            value={values.callbackPhone}
-            onChange={(event) => setValue("callbackPhone", event.target.value)}
-            placeholder="+44 7..."
-            className="mt-3 w-full bg-transparent text-base outline-none placeholder:text-secondary-otto/60"
-            required
-          />
-        </label>
-
-        <div className="glass-panel rounded-3xl p-4 sm:col-span-2">
-          <span className="text-xs uppercase tracking-[0.2em] text-secondary-otto">Cloud callback</span>
-          <p className="mt-3 text-sm leading-6 text-foreground/80">
-            Otto uses this number to call you back after cloud-run business calls finish, even if you leave the app.
-          </p>
-        </div>
       </div>
 
       <button

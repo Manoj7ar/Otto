@@ -16,7 +16,7 @@ export default function OnboardingScreen({ profile, busy = false, onSubmit }: On
         busy={busy}
         submitLabel="Finish onboarding"
         title="Teach Otto how to operate for you"
-        description="These defaults become Otto's cloud memory for Firecrawl research, business calls, and the callback number Otto must use to brief you after the app is closed."
+        description="These defaults shape how Otto understands your context while helping with camera-led questions, nearby discovery, and live research."
         onSubmit={onSubmit}
       />
     </div>

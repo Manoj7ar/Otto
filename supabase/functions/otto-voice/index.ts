@@ -1,13 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
-import {
-  appendCallRuntimeEvent,
-  createCallRuntimeEvent,
-  createServiceClient,
-  getCallRuntimeState,
-  persistCallRuntimeState,
-  type ConciergeTaskRow,
-} from "../_shared/otto-concierge.ts";
 import { normalizeSpeechText } from "../_shared/normalize-speech.ts";
 
 const corsHeaders = {
@@ -18,18 +10,12 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-const OTTO_WEBHOOK_SECRET = Deno.env.get("OTTO_WEBHOOK_SECRET") ?? "";
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY") ?? "";
 const ELEVENLABS_MODEL_ID = Deno.env.get("ELEVENLABS_MODEL_ID") ?? "eleven_multilingual_v2";
 const ELEVENLABS_APP_VOICE_ID = Deno.env.get("ELEVENLABS_APP_VOICE_ID") ?? "";
-const ELEVENLABS_CALL_VOICE_ID = Deno.env.get("ELEVENLABS_CALL_VOICE_ID") ?? ELEVENLABS_APP_VOICE_ID;
-const ELEVENLABS_CALLBACK_VOICE_ID = Deno.env.get("ELEVENLABS_CALLBACK_VOICE_ID") ?? ELEVENLABS_APP_VOICE_ID;
-
-type VoiceMode = "app" | "call" | "callback";
 
 interface VoiceRequestBody {
   text?: unknown;
-  mode?: unknown;
   accessToken?: unknown;
 }
 
@@ -42,15 +28,7 @@ class HttpError extends Error {
   }
 }
 
-function pickVoiceId(mode: VoiceMode) {
-  if (mode === "call") {
-    return ELEVENLABS_CALL_VOICE_ID;
-  }
-
-  if (mode === "callback") {
-    return ELEVENLABS_CALLBACK_VOICE_ID;
-  }
-
+function pickVoiceId() {
   return ELEVENLABS_APP_VOICE_ID;
 }
 
@@ -89,12 +67,12 @@ async function requireAuth(authHeader: string | null) {
   }
 }
 
-async function synthesize(text: string, mode: VoiceMode) {
+async function synthesize(text: string) {
   if (!ELEVENLABS_API_KEY) {
     throw new HttpError(500, "ELEVENLABS_API_KEY not configured.");
   }
 
-  const voiceId = pickVoiceId(mode);
+  const voiceId = pickVoiceId();
 
   if (!voiceId) {
     throw new HttpError(500, "ElevenLabs voice id not configured.");
@@ -127,75 +105,27 @@ async function synthesize(text: string, mode: VoiceMode) {
 }
 
 serve(async (req) => {
-  let taskId: string | null = null;
-  let phase = "voice";
-  let mode: VoiceMode = "app";
-
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    let text = "";
-
-    if (req.method === "GET") {
-      const url = new URL(req.url);
-      const token = url.searchParams.get("token");
-
-      if (!token || token !== OTTO_WEBHOOK_SECRET) {
-        throw new HttpError(401, "Invalid token.");
-      }
-
-      text = (url.searchParams.get("text") ?? "").trim();
-      const requestedMode = url.searchParams.get("mode");
-      mode = requestedMode === "call" || requestedMode === "callback" ? requestedMode : "app";
-      taskId = (url.searchParams.get("taskId") ?? "").trim() || null;
-      phase = (url.searchParams.get("phase") ?? "").trim() || phase;
-    } else {
-      const body = await req.json() as VoiceRequestBody;
-      const authHeader = normalizeBearerToken(
-        req.headers.get("x-otto-auth") ?? req.headers.get("Authorization") ?? body.accessToken,
-      );
-      await requireAuth(authHeader);
-      text = typeof body?.text === "string" ? body.text.trim() : "";
-      const requestedMode = body?.mode;
-      mode = requestedMode === "call" || requestedMode === "callback" ? requestedMode : "app";
+    if (req.method !== "POST") {
+      throw new HttpError(405, "Method not allowed.");
     }
+
+    const body = await req.json() as VoiceRequestBody;
+    const authHeader = normalizeBearerToken(
+      req.headers.get("x-otto-auth") ?? req.headers.get("Authorization") ?? body.accessToken,
+    );
+    await requireAuth(authHeader);
+    const text = typeof body?.text === "string" ? body.text.trim() : "";
 
     if (!text) {
       throw new HttpError(400, "Text is required.");
     }
 
-    const audio = await synthesize(text, mode);
-
-    if (taskId && phase === "close") {
-      try {
-        const client = createServiceClient();
-        const { data } = await client.from("otto_tasks").select("*").eq("id", taskId).maybeSingle();
-        const task = data as ConciergeTaskRow | null;
-
-        if (task) {
-          const currentRuntime = getCallRuntimeState(task);
-
-          if (currentRuntime.closeAttempt.reply) {
-            await persistCallRuntimeState(client, task, {
-              ...currentRuntime,
-              closeAttempt: {
-                ...currentRuntime.closeAttempt,
-                status: "served",
-                at: new Date().toISOString(),
-              },
-              events: [
-                ...currentRuntime.events,
-                createCallRuntimeEvent("info", "voice", "close", "Twilio fetched the close audio."),
-              ].slice(-60),
-            });
-          }
-        }
-      } catch (loggingError) {
-        console.error("otto_voice_close_tracking_error", loggingError);
-      }
-    }
+    const audio = await synthesize(text);
 
     return new Response(audio, {
       headers: {
@@ -206,35 +136,6 @@ serve(async (req) => {
     });
   } catch (error) {
     console.error("otto_voice_error", error);
-
-    if (taskId) {
-      try {
-        const client = createServiceClient();
-        const { data } = await client.from("otto_tasks").select("*").eq("id", taskId).maybeSingle();
-        const task = data as ConciergeTaskRow | null;
-
-        if (task) {
-          await appendCallRuntimeEvent(
-            client,
-            task,
-            createCallRuntimeEvent(
-              "error",
-              "voice",
-              phase,
-              "Voice synthesis failed during the cloud call.",
-              {
-                mode,
-                error: error instanceof Error ? error.message : "Unknown error",
-                status: error instanceof HttpError ? error.status : 500,
-              },
-              error instanceof HttpError ? String(error.status) : "VOICE_SYNTHESIS_FAILED",
-            ),
-          );
-        }
-      } catch (loggingError) {
-        console.error("otto_voice_logging_error", loggingError);
-      }
-    }
 
     if (error instanceof HttpError) {
       return new Response(error.message, { status: error.status, headers: corsHeaders });

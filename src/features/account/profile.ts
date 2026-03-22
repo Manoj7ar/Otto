@@ -10,8 +10,6 @@ export interface ProfileFormValues {
   languageCode: string;
   timezone: string;
   travelMode: string;
-  callbackPhone: string;
-  callBriefingEnabled: boolean;
 }
 
 export function createDefaultProfileValues(profile?: ProfileRow | null): ProfileFormValues {
@@ -22,8 +20,6 @@ export function createDefaultProfileValues(profile?: ProfileRow | null): Profile
     languageCode: profile?.language_code ?? "en",
     timezone: profile?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
     travelMode: profile?.travel_mode ?? "walking",
-    callbackPhone: profile?.callback_phone ?? "",
-    callBriefingEnabled: profile?.call_briefing_enabled ?? true,
   };
 }
 
@@ -36,8 +32,6 @@ export function toProfileUpsert(userId: string, values: ProfileFormValues, onboa
     language_code: values.languageCode.trim() || "en",
     timezone: values.timezone.trim() || "UTC",
     travel_mode: values.travelMode.trim() || "walking",
-    callback_phone: values.callbackPhone.trim() || null,
-    call_briefing_enabled: true,
     onboarding_completed_at: onboardingCompleted ? new Date().toISOString() : null,
   };
 }
@@ -61,10 +55,6 @@ export function validateProfileValues(values: ProfileFormValues): string | null 
 
   if (!values.travelMode.trim()) {
     return "Travel mode is required.";
-  }
-
-  if (!values.callbackPhone.trim()) {
-    return "Callback phone is required for cloud calls.";
   }
 
   return null;
