@@ -36,6 +36,7 @@ export interface ConciergeTaskRow {
   approval_summary: string;
   approved_scope: string[];
   request_query: string;
+  source_snapshot: unknown;
   status: "queued" | "dialing" | "in_progress" | "completed" | "failed" | "canceled";
   inbox_state: "active" | "waiting_approval" | "completed" | "failed" | "canceled";
   latest_step_label: string | null;
@@ -75,6 +76,38 @@ interface ConversationEntry {
   at: string;
 }
 
+export interface CallRuntimeFact {
+  key: string;
+  value: string;
+}
+
+export interface CallRuntimeCloseAttempt {
+  reply: string | null;
+  status: "none" | "planned" | "served" | "completed" | "interrupted";
+  finalStepStatus: "completed" | "failed";
+  finalSummary: string | null;
+  at: string | null;
+}
+
+export interface CallRuntimeEvent {
+  at: string;
+  level: "info" | "warn" | "error";
+  source: "task-chain" | "twilio" | "webhook" | "voice" | "gemini" | "planner";
+  phase: string;
+  message: string;
+  code: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface CallRuntimeState {
+  phase: string;
+  knownFacts: CallRuntimeFact[];
+  pendingChecks: string[];
+  closeAttempt: CallRuntimeCloseAttempt;
+  lastError: CallRuntimeEvent | null;
+  events: CallRuntimeEvent[];
+}
+
 export class HttpError extends Error {
   status: number;
 
@@ -112,6 +145,94 @@ export function cleanStringArray(value: unknown, limit = 8): string[] {
     .slice(0, limit);
 }
 
+function normalizeCallRuntimeFacts(value: unknown): CallRuntimeFact[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => {
+      const row = typeof entry === "object" && entry !== null ? entry as Record<string, unknown> : {};
+      const key = cleanText(row.key);
+      const factValue = cleanText(row.value);
+
+      if (!key || !factValue) {
+        return null;
+      }
+
+      return {
+        key,
+        value: factValue,
+      } satisfies CallRuntimeFact;
+    })
+    .filter((entry): entry is CallRuntimeFact => Boolean(entry))
+    .slice(0, 16);
+}
+
+function normalizeCallRuntimeEvents(value: unknown): CallRuntimeEvent[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => {
+      const row = typeof entry === "object" && entry !== null ? entry as Record<string, unknown> : {};
+      const level =
+        row.level === "info" || row.level === "warn" || row.level === "error"
+          ? row.level
+          : null;
+      const source =
+        row.source === "task-chain" ||
+          row.source === "twilio" ||
+          row.source === "webhook" ||
+          row.source === "voice" ||
+          row.source === "gemini" ||
+          row.source === "planner"
+          ? row.source
+          : null;
+      const phase = cleanText(row.phase);
+      const message = cleanText(row.message);
+
+      if (!level || !source || !phase || !message) {
+        return null;
+      }
+
+      return {
+        at: cleanText(row.at, new Date().toISOString()),
+        level,
+        source,
+        phase,
+        message,
+        code: cleanText(row.code) || null,
+        details: typeof row.details === "object" && row.details !== null
+          ? row.details as Record<string, unknown>
+          : {},
+      } satisfies CallRuntimeEvent;
+    })
+    .filter((entry): entry is CallRuntimeEvent => Boolean(entry))
+    .slice(-60);
+}
+
+function normalizeCloseAttempt(value: unknown): CallRuntimeCloseAttempt {
+  const row = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  const status =
+    row.status === "planned" ||
+      row.status === "served" ||
+      row.status === "completed" ||
+      row.status === "interrupted"
+      ? row.status
+      : "none";
+  const finalStepStatus = row.finalStepStatus === "failed" ? "failed" : "completed";
+
+  return {
+    reply: cleanText(row.reply) || null,
+    status,
+    finalStepStatus,
+    finalSummary: cleanText(row.finalSummary) || null,
+    at: cleanText(row.at) || null,
+  };
+}
+
 export function normalizePhone(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) {
     return null;
@@ -119,6 +240,120 @@ export function normalizePhone(value: unknown): string | null {
 
   const normalized = value.replace(/[^\d+]/g, "");
   return normalized.length >= 7 ? normalized : null;
+}
+
+export function getCallRuntimeState(task: Pick<ConciergeTaskRow, "metadata">): CallRuntimeState {
+  const raw =
+    typeof task.metadata?.callRuntime === "object" && task.metadata.callRuntime !== null
+      ? task.metadata.callRuntime as Record<string, unknown>
+      : {};
+
+  const events = normalizeCallRuntimeEvents(raw.events);
+  const lastError =
+    typeof raw.lastError === "object" && raw.lastError !== null
+      ? normalizeCallRuntimeEvents([raw.lastError])[0] ?? null
+      : null;
+
+  return {
+    phase: cleanText(raw.phase, "idle"),
+    knownFacts: normalizeCallRuntimeFacts(raw.knownFacts),
+    pendingChecks: cleanStringArray(raw.pendingChecks, 12),
+    closeAttempt: normalizeCloseAttempt(raw.closeAttempt),
+    lastError,
+    events,
+  };
+}
+
+export function createCallRuntimeEvent(
+  level: CallRuntimeEvent["level"],
+  source: CallRuntimeEvent["source"],
+  phase: string,
+  message: string,
+  details: Record<string, unknown> = {},
+  code?: string | null,
+): CallRuntimeEvent {
+  return {
+    at: new Date().toISOString(),
+    level,
+    source,
+    phase: cleanText(phase, "unknown"),
+    message: cleanText(message, "Unknown runtime event."),
+    code: cleanText(code) || null,
+    details,
+  };
+}
+
+export async function persistTaskState(
+  client: ReturnType<typeof createServiceClient>,
+  task: ConciergeTaskRow,
+  options: {
+    conversationLog?: ConversationEntry[];
+    callRuntime?: CallRuntimeState;
+    taskUpdates?: Record<string, unknown>;
+  } = {},
+) {
+  const nextMetadata = {
+    ...task.metadata,
+    ...(options.conversationLog ? { conversationLog: options.conversationLog } : {}),
+    ...(options.callRuntime ? { callRuntime: options.callRuntime } : {}),
+  };
+
+  const updates = {
+    ...(options.taskUpdates ?? {}),
+    ...(options.conversationLog ? { conversation_log: options.conversationLog } : {}),
+    metadata: nextMetadata,
+  };
+
+  await client.from("otto_tasks").update(updates).eq("id", task.id);
+
+  task.metadata = nextMetadata;
+
+  if (options.conversationLog) {
+    task.conversation_log = options.conversationLog;
+  }
+
+  Object.assign(task, options.taskUpdates ?? {});
+}
+
+export async function persistCallRuntimeState(
+  client: ReturnType<typeof createServiceClient>,
+  task: ConciergeTaskRow,
+  callRuntime: CallRuntimeState,
+  taskUpdates: Record<string, unknown> = {},
+) {
+  await persistTaskState(client, task, {
+    callRuntime,
+    taskUpdates,
+  });
+}
+
+export async function appendCallRuntimeEvent(
+  client: ReturnType<typeof createServiceClient>,
+  task: ConciergeTaskRow,
+  event: CallRuntimeEvent,
+  options: {
+    phase?: string;
+    knownFacts?: CallRuntimeFact[];
+    pendingChecks?: string[];
+    clearLastError?: boolean;
+    taskUpdates?: Record<string, unknown>;
+  } = {},
+) {
+  const current = getCallRuntimeState(task);
+  const next: CallRuntimeState = {
+    phase: cleanText(options.phase, cleanText(event.phase, current.phase)),
+    knownFacts: options.knownFacts ?? current.knownFacts,
+    pendingChecks: options.pendingChecks ?? current.pendingChecks,
+    closeAttempt: current.closeAttempt,
+    lastError: options.clearLastError
+      ? null
+      : event.level === "error"
+        ? event
+        : current.lastError,
+    events: [...current.events, event].slice(-60),
+  };
+
+  await persistCallRuntimeState(client, task, next, options.taskUpdates ?? {});
 }
 
 export function createServiceClient() {
@@ -376,14 +611,10 @@ export async function persistConversationLog(
   conversationLog: ConversationEntry[],
   updates: Record<string, unknown> = {},
 ) {
-  await client.from("otto_tasks").update({
-    ...updates,
-    conversation_log: conversationLog,
-    metadata: {
-      ...task.metadata,
-      conversationLog,
-    },
-  }).eq("id", task.id);
+  await persistTaskState(client, task, {
+    conversationLog,
+    taskUpdates: updates,
+  });
 }
 
 async function createTwilioCall(params: URLSearchParams) {

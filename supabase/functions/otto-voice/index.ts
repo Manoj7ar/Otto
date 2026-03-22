@@ -1,5 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
+import {
+  appendCallRuntimeEvent,
+  createCallRuntimeEvent,
+  createServiceClient,
+  getCallRuntimeState,
+  persistCallRuntimeState,
+  type ConciergeTaskRow,
+} from "../_shared/otto-concierge.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -116,13 +124,16 @@ async function synthesize(text: string, mode: VoiceMode) {
 }
 
 serve(async (req) => {
+  let taskId: string | null = null;
+  let phase = "voice";
+  let mode: VoiceMode = "app";
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     let text = "";
-    let mode: VoiceMode = "app";
 
     if (req.method === "GET") {
       const url = new URL(req.url);
@@ -135,6 +146,8 @@ serve(async (req) => {
       text = (url.searchParams.get("text") ?? "").trim();
       const requestedMode = url.searchParams.get("mode");
       mode = requestedMode === "call" || requestedMode === "callback" ? requestedMode : "app";
+      taskId = (url.searchParams.get("taskId") ?? "").trim() || null;
+      phase = (url.searchParams.get("phase") ?? "").trim() || phase;
     } else {
       const body = await req.json() as VoiceRequestBody;
       const authHeader = normalizeBearerToken(
@@ -152,6 +165,35 @@ serve(async (req) => {
 
     const audio = await synthesize(text, mode);
 
+    if (taskId && phase === "close") {
+      try {
+        const client = createServiceClient();
+        const { data } = await client.from("otto_tasks").select("*").eq("id", taskId).maybeSingle();
+        const task = data as ConciergeTaskRow | null;
+
+        if (task) {
+          const currentRuntime = getCallRuntimeState(task);
+
+          if (currentRuntime.closeAttempt.reply) {
+            await persistCallRuntimeState(client, task, {
+              ...currentRuntime,
+              closeAttempt: {
+                ...currentRuntime.closeAttempt,
+                status: "served",
+                at: new Date().toISOString(),
+              },
+              events: [
+                ...currentRuntime.events,
+                createCallRuntimeEvent("info", "voice", "close", "Twilio fetched the close audio."),
+              ].slice(-60),
+            });
+          }
+        }
+      } catch (loggingError) {
+        console.error("otto_voice_close_tracking_error", loggingError);
+      }
+    }
+
     return new Response(audio, {
       headers: {
         ...corsHeaders,
@@ -161,6 +203,35 @@ serve(async (req) => {
     });
   } catch (error) {
     console.error("otto_voice_error", error);
+
+    if (taskId) {
+      try {
+        const client = createServiceClient();
+        const { data } = await client.from("otto_tasks").select("*").eq("id", taskId).maybeSingle();
+        const task = data as ConciergeTaskRow | null;
+
+        if (task) {
+          await appendCallRuntimeEvent(
+            client,
+            task,
+            createCallRuntimeEvent(
+              "error",
+              "voice",
+              phase,
+              "Voice synthesis failed during the cloud call.",
+              {
+                mode,
+                error: error instanceof Error ? error.message : "Unknown error",
+                status: error instanceof HttpError ? error.status : 500,
+              },
+              error instanceof HttpError ? String(error.status) : "VOICE_SYNTHESIS_FAILED",
+            ),
+          );
+        }
+      } catch (loggingError) {
+        console.error("otto_voice_logging_error", loggingError);
+      }
+    }
 
     if (error instanceof HttpError) {
       return new Response(error.message, { status: error.status, headers: corsHeaders });
