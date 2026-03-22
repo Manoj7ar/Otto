@@ -310,6 +310,21 @@ function shouldForceWebSearch(query: string) {
     .test(query);
 }
 
+function isHospitalityQuery(value: string) {
+  return /(restaurant|restraunt|hotel|resort|inn|motel|hostel|cafe|café|bar|pub|bistro|diner|reservation|booking|book a table|table for|room|suite|check-in|check in|check-out|check out|stay)/i
+    .test(value);
+}
+
+function shouldBiasCallIntent(query: string, usedVision: boolean, sessionContext: OttoSessionContext) {
+  const combined = [query, sessionContext.activeSubject, sessionContext.summary].filter(Boolean).join(" ");
+
+  if (isHospitalityQuery(combined)) {
+    return true;
+  }
+
+  return usedVision;
+}
+
 function isConversationalTurn(query: string, usedVision: boolean) {
   if (usedVision) {
     return false;
@@ -571,15 +586,18 @@ function normalizeInterpretation(
       ? data.needsWebSearch
       : shouldForceWebSearch(fallbackQuery);
   const conversationalTurn = isConversationalTurn(fallbackQuery, usedVision);
+  const callBias = shouldBiasCallIntent(fallbackQuery, usedVision, sessionContext);
   const searchMode =
     data.searchMode === "search" || data.searchMode === "none"
       ? data.searchMode
-      : needsWebSearch
+      : needsWebSearch || callBias
         ? "search"
         : "none";
   const intentKind = data.intentKind === "call_verification" || data.intentKind === "call_booking"
     ? data.intentKind
-    : "answer";
+    : callBias
+      ? "call_verification"
+      : "answer";
 
   return {
     subject: cleanText(data.subject, fallbackSubject),
@@ -590,12 +608,12 @@ function normalizeInterpretation(
     ),
     userIntent: cleanText(data.userIntent, fallbackQuery || "Continue helping with the current walk."),
     confidence,
-    needsWebSearch: conversationalTurn ? false : needsWebSearch || shouldForceWebSearch(fallbackQuery),
-    searchMode: conversationalTurn ? "none" : searchMode,
+    needsWebSearch: conversationalTurn ? false : needsWebSearch || shouldForceWebSearch(fallbackQuery) || callBias,
+    searchMode: conversationalTurn ? "none" : (searchMode === "none" && callBias ? "search" : searchMode),
     searchQuery,
     detailHints: cleanStringArray(data.detailHints),
     intentKind,
-    targetBusinessHint: cleanText(data.targetBusinessHint),
+    targetBusinessHint: cleanText(data.targetBusinessHint, sessionContext.activeSubject || fallbackSubject),
   };
 }
 
@@ -893,9 +911,9 @@ function ensureCallPrompt(answer: string, proposal: OttoCallProposal | null) {
     return answer;
   }
 
-  return /do you want me to make this call\?/i.test(answer)
+  return /do you want me to make a call and check\?/i.test(answer)
     ? answer
-    : `${answer} Do you want me to make this call?`;
+    : `${answer} Do you want me to make a call and check?`;
 }
 
 function isSimpleGreeting(query: string, usedVision: boolean) {
@@ -1305,6 +1323,7 @@ serve(async (req) => {
           "You are Otto, a mobile AI walking companion and cloud call planner.",
           "Interpret the current user turn using the current frame when available, plus session memory and the user's stored profile context.",
           "Use call_verification or call_booking when a live call would materially improve the outcome over research alone.",
+          "For restaurants, hotels, cafes, bars, reservations, bookings, or image-based place questions, strongly prefer call_verification when a call could check live details.",
           "Firecrawl is the only retrieval layer. There is no browser automation.",
           "Choose web retrieval when external, fresh, contact, or verification information is needed.",
           "For greetings, thanks, acknowledgements, confirmations, and other lightweight conversational turns, do not request web search.",
@@ -1369,6 +1388,8 @@ serve(async (req) => {
           "Answer the current turn using the current frame, session memory, user profile defaults, and Firecrawl evidence.",
           "If there is no Firecrawl evidence and the turn is lightweight conversation, reply naturally and briefly without implying that research happened.",
           "If a call would help more than research alone, return a callProposal with the target, phone number, exact reason, and question list.",
+          "For restaurants, hotels, cafes, bars, reservations, bookings, or image-led place questions, prefer returning a callProposal when Firecrawl gives a plausible business phone.",
+          "When you return a callProposal, your answer should naturally lead into asking whether Otto should make the call and check.",
           "Only return callProposal when the phone number is plausible from Firecrawl-backed evidence.",
           "followUpActions must only contain callback_user.",
           "There is no browser automation.",

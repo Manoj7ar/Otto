@@ -66,16 +66,49 @@ function MessageDisclosure({
   children: React.ReactNode;
 }) {
   return (
-    <details className="group mt-4 rounded-[1.2rem] border border-black/10 bg-white/20 open:bg-white/28">
-      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-medium uppercase tracking-[0.2em] text-secondary-otto">
+    <details className="group mt-3 rounded-[1rem] border border-black/10 bg-white/20 open:bg-white/28 sm:mt-4 sm:rounded-[1.2rem]">
+      <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-secondary-otto sm:px-4 sm:py-3 sm:text-xs sm:tracking-[0.2em]">
         <span>{label}</span>
         <span className="text-[10px] transition-transform duration-200 group-open:rotate-45">+</span>
       </summary>
-      <div className="border-t border-black/10 px-4 py-4 text-sm text-foreground/85">
+      <div className="border-t border-black/10 px-3 py-3 text-sm text-foreground/85 sm:px-4 sm:py-4">
         {children}
       </div>
     </details>
   );
+}
+
+function ThinkingBubble() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex w-full max-w-[92%] items-end gap-2 sm:max-w-xl sm:gap-3"
+    >
+      <img
+        src="/otter.png"
+        alt="Otto"
+        className="h-9 w-9 shrink-0 object-cover sm:h-11 sm:w-11"
+      />
+      <div className="glass-panel rounded-[1.4rem] rounded-bl-md px-4 py-3 sm:rounded-[1.8rem] sm:px-5 sm:py-4">
+        <div className="flex items-center gap-2">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/75" />
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/55 [animation-delay:160ms]" />
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/35 [animation-delay:320ms]" />
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function isAffirmativeCallResponse(value: string) {
+  return /^(yes|yeah|yep|yup|sure|ok|okay|please do|go ahead|do it|make the call|call them|call them now|yes make the call|yes call|yes do it)\b/i
+    .test(value.trim());
+}
+
+function isNegativeCallResponse(value: string) {
+  return /^(no|nah|nope|not now|don't|do not|dont|no dont|no don't|skip it|not yet|cancel)\b/i
+    .test(value.trim());
 }
 
 export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPageProps) {
@@ -94,6 +127,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
   const cameraRef = useRef<CameraViewHandle>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const liveAgentPaused = isProcessing || isSpeaking || approvalVisible || approvingTask || cameraEnabled;
 
   const {
@@ -205,6 +239,19 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
     }
   }, [latestReply]);
 
+  useEffect(() => {
+    const viewport = scrollViewportRef.current;
+
+    if (!viewport) {
+      return;
+    }
+
+    viewport.scrollTo({
+      top: viewport.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [isProcessing, sessionContext.turns.length]);
+
   const handleCameraToggle = useCallback(() => {
     setCapturedImageBase64(null);
     setCameraEnabled((enabled) => !enabled);
@@ -227,12 +274,110 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
     setCapturedImageBase64(null);
   }, []);
 
+  const appendLocalAssistantTurn = useCallback((userText: string, assistantText: string) => {
+    const createdAt = new Date().toISOString();
+    const userTurn = {
+      id:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `turn-${Date.now()}`,
+      role: "user" as const,
+      content: userText,
+      createdAt,
+      usedVision: false,
+    };
+    const reply: OttoReplyData = {
+      messageId:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `msg-${Date.now()}`,
+      createdAt,
+      subject: latestReply?.subject ?? sessionContext.activeSubject ?? "Otto",
+      subjectType: latestReply?.subjectType ?? sessionContext.activeSubjectType ?? "assistant",
+      answer: assistantText,
+      confidence: "high",
+      usedVision: false,
+      usedWebSearch: false,
+      suggestedFollowUps: [],
+      actions: [],
+      sources: [],
+      structuredDetails: [],
+      callProposal: null,
+    };
+    const assistantTurn = {
+      id: reply.messageId,
+      role: "assistant" as const,
+      content: assistantText,
+      createdAt,
+      usedVision: false,
+      usedWebSearch: false,
+      reply,
+    };
+
+    setLatestReply(reply);
+    setSessionContext((current) => ({
+      ...current,
+      activeSubject: reply.subject,
+      activeSubjectType: reply.subjectType,
+      summary: assistantText,
+      turns: [...current.turns, userTurn, assistantTurn].slice(-8),
+    }));
+  }, [latestReply, sessionContext.activeSubject, sessionContext.activeSubjectType]);
+
+  const startCallTask = useCallback(async () => {
+    if (!latestReply?.callProposal) {
+      return false;
+    }
+
+    if (!profile.callback_phone) {
+      toast.error("Add a callback phone number in your profile before starting cloud calls.");
+      return false;
+    }
+
+    setApprovingTask(true);
+
+    try {
+      await approveOttoTask(latestQuery, latestReply.subject, latestReply.callProposal);
+      await onTaskCreated();
+      setApprovalVisible(false);
+      toast.success("Cloud call started. You can leave the app.");
+      onOpenTasks();
+      return true;
+    } catch (error) {
+      console.error("otto_task_approval_error", error);
+      toast.error(error instanceof Error ? error.message : "Could not start the cloud call.");
+      return false;
+    } finally {
+      setApprovingTask(false);
+    }
+  }, [latestQuery, latestReply, onOpenTasks, onTaskCreated, profile.callback_phone]);
+
   const handleSubmit = useCallback(
     async (text: string, imageOverride?: string) => {
       const query = text.trim();
 
       if (!query) {
         return;
+      }
+
+      if (!imageOverride && latestReply?.callProposal && approvalVisible) {
+        if (isAffirmativeCallResponse(query)) {
+          stopSpeaking();
+          const started = await startCallTask();
+
+          if (started) {
+            appendLocalAssistantTurn(query, "Starting the call now. I'll check and update you in Tasks.");
+          }
+
+          return;
+        }
+
+        if (isNegativeCallResponse(query)) {
+          stopSpeaking();
+          setApprovalVisible(false);
+          appendLocalAssistantTurn(query, "Okay, I won't make the call.");
+          return;
+        }
       }
 
       stopSpeaking();
@@ -269,7 +414,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
         setIsProcessing(false);
       }
     },
-    [cameraEnabled, capturedImageBase64, resetTranscript, sessionContext, stopSpeaking]
+    [appendLocalAssistantTurn, approvalVisible, cameraEnabled, capturedImageBase64, latestReply?.callProposal, resetTranscript, sessionContext, startCallTask, stopSpeaking]
   );
 
   const handleMicToggle = useCallback(
@@ -319,30 +464,8 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
   }, [resetTranscript, stopListening, stopSpeaking]);
 
   const handleApproveTask = useCallback(async () => {
-    if (!latestReply?.callProposal) {
-      return;
-    }
-
-    if (!profile.callback_phone) {
-      toast.error("Add a callback phone number in your profile before starting cloud calls.");
-      return;
-    }
-
-    setApprovingTask(true);
-
-    try {
-      await approveOttoTask(latestQuery, latestReply.subject, latestReply.callProposal);
-      await onTaskCreated();
-      setApprovalVisible(false);
-      toast.success("Cloud call started. You can leave the app.");
-      onOpenTasks();
-    } catch (error) {
-      console.error("otto_task_approval_error", error);
-      toast.error(error instanceof Error ? error.message : "Could not start the cloud call.");
-    } finally {
-      setApprovingTask(false);
-    }
-  }, [latestQuery, latestReply, onOpenTasks, onTaskCreated, profile.callback_phone]);
+    await startCallTask();
+  }, [startCallTask]);
 
   const showGreeting = !cameraEnabled && !hasSessionTurns && !isProcessing;
   const capturedPreviewUrl = capturedImageBase64 ? `data:image/jpeg;base64,${capturedImageBase64}` : null;
@@ -382,13 +505,13 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
       </AnimatePresence>
 
       {!cameraEnabled && (
-        <div className="mx-auto flex h-full w-full max-w-5xl flex-1 flex-col overflow-hidden px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-6 sm:px-6">
-          <div className="mb-5 flex items-center justify-end gap-3">
+        <div className="mx-auto flex h-full w-full max-w-5xl flex-1 flex-col overflow-hidden px-3 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 sm:pb-[calc(7rem+env(safe-area-inset-bottom))] sm:pt-6">
+          <div className="mb-3 flex items-center justify-end gap-3 sm:mb-5">
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={onOpenTasks}
-                className="glass-button inline-flex h-11 w-11 items-center justify-center rounded-full"
+                className="glass-button inline-flex h-10 w-10 items-center justify-center rounded-full sm:h-11 sm:w-11"
                 aria-label="Open tasks"
               >
                 <History size={16} />
@@ -396,7 +519,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
               <button
                 type="button"
                 onClick={handleResetSession}
-                className="glass-button inline-flex h-11 w-11 items-center justify-center rounded-full"
+                className="glass-button inline-flex h-10 w-10 items-center justify-center rounded-full sm:h-11 sm:w-11"
                 aria-label="Reset session"
               >
                 <RotateCcw size={16} />
@@ -405,7 +528,10 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-2 py-2 sm:px-3 sm:py-3">
+            <div
+              ref={scrollViewportRef}
+              className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-0.5 py-1 sm:space-y-5 sm:px-3 sm:py-3"
+            >
               <AnimatePresence mode="wait">
                 {showGreeting && <WavingOtterGreeting key="greeting" />}
               </AnimatePresence>
@@ -419,13 +545,13 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                           key={turn.id}
                           initial={{ opacity: 0, y: 18 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className="ml-auto flex w-full max-w-xl flex-col items-end gap-2"
+                          className="ml-auto flex w-full max-w-[92%] flex-col items-end gap-1.5 sm:max-w-xl sm:gap-2"
                         >
-                          <span className="px-2 text-[11px] uppercase tracking-[0.22em] text-secondary-otto">Sent by me</span>
-                          <div className="glass w-full rounded-[1.8rem] rounded-br-md px-5 py-4 text-sm leading-7 text-foreground">
+                          <span className="px-2 text-[10px] uppercase tracking-[0.18em] text-secondary-otto sm:text-[11px] sm:tracking-[0.22em]">You</span>
+                          <div className="glass w-full rounded-[1.45rem] rounded-br-md px-4 py-3 text-sm leading-6 text-foreground sm:rounded-[1.8rem] sm:px-5 sm:py-4 sm:leading-7">
                             {turn.content}
                           </div>
-                          <span className="px-2 text-[11px] text-secondary-otto">{formatBubbleTime(turn.createdAt)}</span>
+                          <span className="px-2 text-[10px] text-secondary-otto sm:text-[11px]">{formatBubbleTime(turn.createdAt)}</span>
                         </motion.div>
                       );
                     }
@@ -435,16 +561,16 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                         key={turn.id}
                         initial={{ opacity: 0, y: 18 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="flex w-full max-w-2xl items-start gap-3"
+                        className="flex w-full max-w-full items-start gap-2 sm:max-w-2xl sm:gap-3"
                       >
                         <img
                           src="/otter.png"
                           alt="Otter"
-                          className="mt-1 h-11 w-11 object-cover"
+                          className="mt-1 h-9 w-9 shrink-0 object-cover sm:h-11 sm:w-11"
                         />
                         <div className="min-w-0 flex-1">
-                          <span className="px-2 text-[11px] uppercase tracking-[0.22em] text-secondary-otto">Back to me</span>
-                          <div className="glass-panel mt-2 rounded-[1.8rem] rounded-bl-md px-5 py-4 text-sm leading-7 text-foreground">
+                          <span className="px-2 text-[10px] uppercase tracking-[0.18em] text-secondary-otto sm:text-[11px] sm:tracking-[0.22em]">Otto</span>
+                          <div className="glass-panel mt-1.5 rounded-[1.45rem] rounded-bl-md px-4 py-3 text-sm leading-6 text-foreground sm:mt-2 sm:rounded-[1.8rem] sm:px-5 sm:py-4 sm:leading-7">
                             <p>{turn.content}</p>
 
                             {(turn.reply.structuredDetails.length > 0 || turn.reply.usedVision || turn.reply.usedWebSearch) && (
@@ -466,7 +592,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                                   {turn.reply.structuredDetails.length > 0 && turn.reply.subjectType !== "assistant" && (
                                     <div className="grid gap-3 sm:grid-cols-2">
                                       {turn.reply.structuredDetails.slice(0, 4).map((detail) => (
-                                        <div key={`${detail.label}-${detail.value}`} className="rounded-[1.2rem] border border-black/10 bg-white/30 px-4 py-3">
+                                        <div key={`${detail.label}-${detail.value}`} className="rounded-[1rem] border border-black/10 bg-white/30 px-3 py-3 sm:rounded-[1.2rem] sm:px-4">
                                           <p className="text-[11px] uppercase tracking-[0.2em] text-secondary-otto">{detail.label}</p>
                                           <p className="mt-2 text-sm leading-6 text-foreground/90">{detail.value}</p>
                                         </div>
@@ -501,7 +627,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
 
                             {turn.reply.actions.length > 0 && (
                               <MessageDisclosure label="Actions">
-                                <div className="flex flex-wrap gap-3">
+                                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
                                   {turn.reply.actions.map((action, index) => {
                                     const className = index === 0 ? "glass-button-primary" : "glass-button";
 
@@ -510,7 +636,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                                         <button
                                           key={`${action.type}-${action.label}`}
                                           type="button"
-                                          className={`${className} rounded-full px-5 py-3 text-sm font-medium opacity-60`}
+                                          className={`${className} w-full rounded-full px-5 py-3 text-sm font-medium opacity-60 sm:w-auto`}
                                           disabled
                                         >
                                           {action.label}
@@ -524,7 +650,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                                         href={action.url}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className={`${className} inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-medium`}
+                                        className={`${className} inline-flex w-full items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-medium sm:w-auto`}
                                       >
                                         {action.label}
                                         <ExternalLink size={14} />
@@ -536,25 +662,25 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                             )}
 
                             {latestReply?.messageId === turn.reply.messageId && canSpeak && (
-                              <div className="mt-4 flex flex-wrap gap-2">
+                              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                                 <button
                                   type="button"
                                   onClick={handleReplay}
-                                  className="glass-button rounded-full px-4 py-2 text-xs font-medium"
+                                  className="glass-button w-full rounded-full px-4 py-2 text-xs font-medium sm:w-auto"
                                 >
                                   {isSpeaking ? "Speaking..." : "Replay voice"}
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setIsMuted((value) => !value)}
-                                  className="glass-button rounded-full px-4 py-2 text-xs font-medium"
+                                  className="glass-button w-full rounded-full px-4 py-2 text-xs font-medium sm:w-auto"
                                 >
                                   {isMuted ? "Unmute auto voice" : "Mute auto voice"}
                                 </button>
                               </div>
                             )}
                           </div>
-                          <span className="mt-2 block px-2 text-[11px] text-secondary-otto">{formatBubbleTime(turn.createdAt)}</span>
+                          <span className="mt-1.5 block px-2 text-[10px] text-secondary-otto sm:mt-2 sm:text-[11px]">{formatBubbleTime(turn.createdAt)}</span>
                         </div>
                       </motion.div>
                     );
@@ -565,39 +691,16 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                       <motion.div
                         initial={{ opacity: 0, y: 18 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="ml-auto flex w-full max-w-xl flex-col items-end gap-2"
+                        className="ml-auto flex w-full max-w-[92%] flex-col items-end gap-1.5 sm:max-w-xl sm:gap-2"
                       >
-                        <span className="px-2 text-[11px] uppercase tracking-[0.22em] text-secondary-otto">Sent by me</span>
-                        <div className="glass w-full rounded-[1.8rem] rounded-br-md px-5 py-4 text-sm leading-7 text-foreground">
+                        <span className="px-2 text-[10px] uppercase tracking-[0.18em] text-secondary-otto sm:text-[11px] sm:tracking-[0.22em]">You</span>
+                        <div className="glass w-full rounded-[1.45rem] rounded-br-md px-4 py-3 text-sm leading-6 text-foreground sm:rounded-[1.8rem] sm:px-5 sm:py-4 sm:leading-7">
                           {pendingUserMessage.content}
                         </div>
-                        <span className="px-2 text-[11px] text-secondary-otto">{formatBubbleTime(pendingUserMessage.createdAt)}</span>
+                        <span className="px-2 text-[10px] text-secondary-otto sm:text-[11px]">{formatBubbleTime(pendingUserMessage.createdAt)}</span>
                       </motion.div>
 
-                      <motion.div
-                        initial={{ opacity: 0, y: 18 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex w-full max-w-xl items-start gap-3"
-                      >
-                        <img
-                          src="/otter.png"
-                          alt="Otter"
-                          className="mt-1 h-11 w-11 object-cover"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <span className="px-2 text-[11px] uppercase tracking-[0.22em] text-secondary-otto">Otter is thinking</span>
-                          <div className="glass-panel mt-2 rounded-[1.8rem] rounded-bl-md px-5 py-4 text-sm leading-7 text-foreground">
-                            <div className="flex items-center gap-3">
-                              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/75" />
-                              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/55 [animation-delay:160ms]" />
-                              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/35 [animation-delay:320ms]" />
-                            </div>
-                            <p className="mt-4 text-sm text-foreground/70">
-                              Thinking through your message and preparing the reply...
-                            </p>
-                          </div>
-                        </div>
-                      </motion.div>
+                      <ThinkingBubble />
                     </>
                   )}
                 </>

@@ -34,7 +34,7 @@ export default function SourceCard({ source }: SourceCardProps) {
       href={source.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="block overflow-hidden rounded-[1.2rem] border border-black/10 bg-white/30 transition-colors hover:bg-white/40"
+      className="block overflow-hidden rounded-[1rem] border border-black/10 bg-white/30 transition-colors hover:bg-white/40 sm:rounded-[1.2rem]"
     >
       {source.imageUrl && (
         <div className="aspect-[16/9] w-full overflow-hidden bg-black/5">
@@ -48,17 +48,17 @@ export default function SourceCard({ source }: SourceCardProps) {
         </div>
       )}
 
-      <div className="px-4 py-4">
+      <div className="px-3 py-3 sm:px-4 sm:py-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[11px] uppercase tracking-[0.18em] text-secondary-otto">
               {siteLabel}
             </p>
-            <p className="mt-2 text-sm font-medium leading-6 text-foreground">
+            <p className="mt-1.5 text-sm font-medium leading-6 text-foreground sm:mt-2">
               {source.title}
             </p>
           </div>
-          <span className="inline-flex shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/55 p-2 text-primary">
+          <span className="inline-flex shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/55 p-1.5 text-primary sm:p-2">
             <ArrowUpRight size={14} />
           </span>
         </div>
