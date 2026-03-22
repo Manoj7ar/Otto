@@ -1,8 +1,6 @@
-import { supabase } from "@/shared/supabase/client";
+import type { ProfileRow } from "@/features/account/profile";
+import { supabasePublishableKey, supabaseUrl } from "@/shared/supabase/client";
 import type { OttoSessionContext, OttoTurnResponse } from "../types";
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 async function readFunctionError(response: Response, fallback: string) {
   const raw = await response.text().catch(() => "");
@@ -26,26 +24,19 @@ async function readFunctionError(response: Response, fallback: string) {
 
 export async function submitOttoTurn(
   query: string,
+  profile: ProfileRow,
   imageBase64?: string,
   sessionContext?: OttoSessionContext
 ): Promise<OttoTurnResponse> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session?.access_token) {
-    throw new Error("No active Supabase session. Sign in again and retry.");
-  }
-
   const response = await fetch(`${supabaseUrl}/functions/v1/otto-analyze`, {
     method: "POST",
     headers: {
       apikey: supabasePublishableKey,
       "Content-Type": "application/json",
-      "x-otto-auth": `Bearer ${session.access_token}`,
     },
     body: JSON.stringify({
       query,
+      profile,
       imageBase64,
       sessionContext,
     }),

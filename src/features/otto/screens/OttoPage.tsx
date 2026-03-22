@@ -280,7 +280,7 @@ export default function OttoPage({ profile }: OttoPageProps) {
       resetTranscript();
 
       try {
-        const data = await submitOttoTurn(query, imageBase64, sessionContext);
+        const data = await submitOttoTurn(query, profile, imageBase64, sessionContext);
         setLatestReply(data.reply);
         setSessionContext(data.sessionContext);
         setCapturedImageBase64(null);
@@ -292,7 +292,7 @@ export default function OttoPage({ profile }: OttoPageProps) {
         setIsProcessing(false);
       }
     },
-    [cameraEnabled, capturedImageBase64, resetTranscript, sessionContext, stopSpeaking]
+    [cameraEnabled, capturedImageBase64, profile, resetTranscript, sessionContext, stopSpeaking]
   );
 
   const handleMicToggle = useCallback(

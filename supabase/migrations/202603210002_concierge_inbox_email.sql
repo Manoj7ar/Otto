@@ -1,2 +1,2 @@
--- Historical task schema removed.
--- Otto now uses profiles plus in-app research and voice only.
+-- No-op.
+-- Otto no longer defines database-backed task or profile tables.

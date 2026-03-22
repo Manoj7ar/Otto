@@ -1,2 +1,2 @@
 -- No-op.
--- Email and telephony task tables no longer exist in the current Otto schema baseline.
+-- No database schema changes are required for the current local-profile Otto product.

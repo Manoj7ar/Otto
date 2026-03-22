@@ -1,22 +1,18 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 import { normalizeSpeechText } from "../_shared/normalize-speech.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-otto-auth, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "apikey, content-type, x-client-info, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY") ?? "";
 const ELEVENLABS_MODEL_ID = Deno.env.get("ELEVENLABS_MODEL_ID") ?? "eleven_multilingual_v2";
 const ELEVENLABS_APP_VOICE_ID = Deno.env.get("ELEVENLABS_APP_VOICE_ID") ?? "";
 
 interface VoiceRequestBody {
   text?: unknown;
-  accessToken?: unknown;
 }
 
 class HttpError extends Error {
@@ -28,59 +24,18 @@ class HttpError extends Error {
   }
 }
 
-function pickVoiceId() {
-  return ELEVENLABS_APP_VOICE_ID;
-}
-
-function normalizeBearerToken(value: unknown) {
-  if (typeof value !== "string" || !value.trim()) {
-    return null;
-  }
-
-  return value.startsWith("Bearer ") ? value : `Bearer ${value}`;
-}
-
-async function requireAuth(authHeader: string | null) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    throw new HttpError(500, "Supabase environment is not configured.");
-  }
-
-  if (!authHeader) {
-    throw new HttpError(401, "Authentication required.");
-  }
-
-  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: {
-      headers: {
-        Authorization: authHeader,
-      },
-    },
-  });
-
-  const {
-    data: { user },
-    error,
-  } = await client.auth.getUser();
-
-  if (error || !user) {
-    throw new HttpError(401, "Invalid session.");
-  }
-}
-
 async function synthesize(text: string) {
   if (!ELEVENLABS_API_KEY) {
     throw new HttpError(500, "ELEVENLABS_API_KEY not configured.");
   }
 
-  const voiceId = pickVoiceId();
-
-  if (!voiceId) {
+  if (!ELEVENLABS_APP_VOICE_ID) {
     throw new HttpError(500, "ElevenLabs voice id not configured.");
   }
 
   const spokenText = normalizeSpeechText(text);
 
-  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=mp3_44100_128`, {
+  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_APP_VOICE_ID}/stream?output_format=mp3_44100_128`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -115,10 +70,6 @@ serve(async (req) => {
     }
 
     const body = await req.json() as VoiceRequestBody;
-    const authHeader = normalizeBearerToken(
-      req.headers.get("x-otto-auth") ?? req.headers.get("Authorization") ?? body.accessToken,
-    );
-    await requireAuth(authHeader);
     const text = typeof body?.text === "string" ? body.text.trim() : "";
 
     if (!text) {

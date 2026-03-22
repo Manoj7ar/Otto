@@ -1,15 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.57.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-otto-auth, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "apikey, content-type, x-client-info, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 const MAX_SESSION_TURNS = 8;
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GOOGLE_API_KEY");
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
 const FIRECRAWL_API_KEY = Deno.env.get("FIRECRAWL_API_KEY");
@@ -22,6 +19,7 @@ interface AnalyzeRequest {
   query?: string;
   imageBase64?: string;
   sessionContext?: unknown;
+  profile?: unknown;
 }
 
 interface ProfileRow {
@@ -1088,51 +1086,23 @@ async function researchWithFirecrawl(
   return await enrichSources(deduped);
 }
 
-async function getAuthenticatedProfile(req: Request): Promise<ProfileRow> {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    throw new HttpError(500, "Supabase environment is not configured.");
+function normalizeIncomingProfile(raw: unknown): ProfileRow {
+  const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
+  const profile = {
+    full_name: cleanText(data.full_name) || null,
+    home_location: cleanText(data.home_location),
+    current_region: cleanText(data.current_region),
+    language_code: cleanText(data.language_code, "en"),
+    timezone: cleanText(data.timezone, "UTC"),
+    travel_mode: cleanText(data.travel_mode, "walking"),
+    onboarding_completed_at: cleanText(data.onboarding_completed_at) || null,
+  } satisfies ProfileRow;
+
+  if (!profile.home_location || !profile.current_region || !profile.onboarding_completed_at) {
+    throw new HttpError(400, "A completed local Otto profile is required.");
   }
 
-  const authHeader = req.headers.get("x-otto-auth") ?? req.headers.get("Authorization");
-
-  if (!authHeader) {
-    throw new HttpError(401, "Authentication required.");
-  }
-
-  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: {
-      headers: {
-        Authorization: authHeader,
-      },
-    },
-  });
-
-  const {
-    data: { user },
-    error: authError,
-  } = await client.auth.getUser();
-
-  if (authError || !user) {
-    throw new HttpError(401, "Invalid session.");
-  }
-
-  const { data: profile, error: profileError } = await client
-    .from("profiles")
-    .select(
-      "full_name, home_location, current_region, language_code, timezone, travel_mode, onboarding_completed_at",
-    )
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profileError) {
-    throw new HttpError(500, "Failed to load profile.");
-  }
-
-  if (!profile?.onboarding_completed_at) {
-    throw new HttpError(403, "Complete onboarding before using Otto.");
-  }
-
-  return profile as ProfileRow;
+  return profile;
 }
 
 serve(async (req) => {
@@ -1143,8 +1113,12 @@ serve(async (req) => {
   const startedAt = performance.now();
 
   try {
-    const profile = await getAuthenticatedProfile(req);
-    const { query = "", imageBase64, sessionContext: rawSessionContext }: AnalyzeRequest = await req.json();
+    if (req.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
+    }
+
+    const { query = "", imageBase64, sessionContext: rawSessionContext, profile: rawProfile }: AnalyzeRequest = await req.json();
+    const profile = normalizeIncomingProfile(rawProfile);
     const trimmedQuery = query.trim();
     const cleanedImage = imageBase64 ? cleanBase64Image(imageBase64) : "";
     const usedVision = Boolean(cleanedImage);

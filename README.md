@@ -64,7 +64,7 @@ Otto is built for that gap. It is strongest when the question depends on the phy
 ```mermaid
 flowchart TD
     A[Mobile user] --> B[React + Vite app]
-    B --> C[Supabase Auth + Profiles]
+    B --> C[Local onboarding profile]
     B --> D[otto-analyze]
     D --> E[Gemini reasoning]
     D --> F[Firecrawl research]
@@ -100,12 +100,11 @@ Otto uses two Supabase edge functions:
 
 ### Data layer
 
-Supabase stores:
+Otto stores:
 
-- authentication
-- profile context
-- onboarding state
-- the data Otto needs to keep answers personalized and mobile-friendly
+- onboarding and profile defaults locally in the browser
+- session context in memory during the active chat
+- secrets and hosted functions in Supabase
 
 ## Demo Flow
 
@@ -137,7 +136,7 @@ This makes Otto demo much closer to a dedicated mobile app than a browser tab.
 ## Tech Stack
 
 - Frontend: React, TypeScript, Vite, Framer Motion
-- Backend: Supabase Auth, Database, Edge Functions
+- Backend: Supabase Edge Functions
 - Reasoning: Gemini
 - Research: Firecrawl
 - Voice: ElevenLabs

@@ -1,2 +1,2 @@
 -- No-op.
--- Callback steps were removed when Otto was re-centered on camera, search, and voice.
+-- Otto no longer uses database-backed workflow steps.
