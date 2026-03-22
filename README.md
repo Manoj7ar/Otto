@@ -1,145 +1,167 @@
 # Otto: AI for Your Physical World
 
-Otto is a mobile-first AI assistant for questions that start in the real world, not in a search box.
-
-Point your camera at a product, menu, sign, shelf, storefront, or place. Ask what it is, what it costs, whether there are cheaper alternatives nearby or online, or what option looks best right now. Otto combines vision, live web research, spoken replies, and session memory into one mobile experience.
-
 <p align="center">
   <img src="public/otter-readme.png" alt="Otto otter mark" width="320" />
 </p>
 
-## What Otto Does
+Otto is a mobile-first AI assistant for questions that begin in front of you, not in a browser tab.
 
-Otto is designed around four jobs:
+You can point the camera at a product, book, menu, sign, storefront, or place and ask practical questions such as what it is, what it costs, whether there are cheaper alternatives, whether it is worth buying, or what to do next. Otto combines image understanding, live web research, spoken replies, and lightweight session memory into one mobile experience.
 
-1. Understand what the user is looking at or asking about.
-2. Research live information from the web when the question needs fresh evidence.
-3. Compare options in a way that is practical in the moment.
-4. Return a grounded answer with sources, structured context, and optional spoken playback.
+This repo is set up for demo speed. There is no login wall. The onboarding flow collects local context such as home location, current region, language, timezone, and travel mode, then stores that profile in the browser so Otto can use it in answers without slowing the experience down.
 
-Typical prompts:
+## What Otto Actually Does
 
-- `What is this product and how much does it usually cost?`
+Otto is designed around a simple loop:
+
+1. See what the user is asking about.
+2. Understand the situation and the decision they are trying to make.
+3. Pull in live web evidence when the answer depends on fresh information.
+4. Return a grounded answer with useful sources and optional voice playback.
+
+That makes Otto useful for more than one narrow demo. It works well across:
+
+- product recognition and price checks
+- cheaper alternatives nearby or online
+- book discovery and recommendation-style questions
+- menu understanding and dietary checks
+- nearby place discovery
+- quick comparisons between real-world options
+
+Example prompts:
+
+- `What is this product and what should I expect to pay for it?`
 - `Find cheaper alternatives nearby or online.`
+- `Tell me more about this book and why I should read it.`
 - `What are the vegetarian options on this menu?`
-- `What is this place and is it worth going to?`
+- `What is this place, and is it worth going to?`
 - `Find the nearest vegetarian restaurants.`
+
+## Why This Project Matters
+
+Most AI products are strongest when the input is already text and the user already knows what to search for. Otto is aimed at the opposite case: moments where the user is standing in front of something in the physical world and wants help understanding it quickly.
+
+That changes the product shape. Otto is not just a chatbot and it is not just a camera demo. The useful part is the handoff between perception, research, comparison, and decision support.
 
 ## Product Experience
 
-From the user's perspective, Otto feels like this:
-
 ```text
-Point, type, or speak
-        |
-        v
-Otto understands the scene or request
-        |
-        v
+User points, types, or speaks
+          |
+          v
+Otto interprets the scene or request
+          |
+          v
 Otto researches the web when needed
-        |
-        v
-Otto compares options and answers clearly
-        |
-        v
-Otto can read the result aloud in the app
+          |
+          v
+Otto compares options and explains the result
+          |
+          v
+Otto can read the answer aloud in the app
 ```
 
-The main product loop is intentionally simple: see, understand, research, compare, answer.
+From the user perspective, the product is intentionally simple:
 
-## Why It Matters
+- ask by text, voice, or camera
+- get one clear answer back
+- expand sources or context only when needed
+- hear the answer out loud if that is more convenient
 
-Most assistants are good at summarizing text that is already online. They are weaker when the user is standing in front of something and needs help deciding what it is, what it costs, or what to do next.
+The UI is tuned for mobile demoing. Otto supports install-to-home-screen, compact source panels, live voice dictation, and spoken answer playback without requiring any account setup.
 
-Otto is built for that gap. It is strongest when the question depends on the physical world around the user:
+## Demo Story for Judges
 
-- identifying an item from a photo
-- understanding a menu or storefront
-- looking up prices and cheaper alternatives
-- comparing nearby places
-- turning camera input into a practical decision
+If you want the cleanest hackathon demo, show Otto across three different question types:
+
+1. Camera understanding  
+   `What is this item?`
+
+2. Practical decision support  
+   `How much does it usually cost, and are there cheaper alternatives nearby or online?`
+
+3. Rich follow-up on a physical object  
+   `Tell me more about this book and why I should read it.`
+
+That sequence makes the product legible very quickly:
+
+- Otto can see
+- Otto can research
+- Otto can compare
+- Otto can help the user decide
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    A[Mobile user] --> B[React + Vite app]
+    A[Mobile user] --> B[React + Vite PWA]
     B --> C[Local onboarding profile]
-    B --> D[otto-analyze]
+    B --> D[otto-analyze edge function]
     D --> E[Gemini reasoning]
     D --> F[Firecrawl research]
     D --> B
-    B --> G[otto-voice]
+    B --> G[otto-voice edge function]
     G --> H[ElevenLabs speech]
 ```
 
-## Core System Pieces
-
 ### Frontend
 
-The app shell lives in `src/app/App.tsx`, and the main experience lives in `src/features/otto/screens/OttoPage.tsx`.
+The app shell lives in `src/app/App.tsx`.
 
-The UI is mobile-first and includes:
+The main Otto experience lives in `src/features/otto/screens/OttoPage.tsx`, with the surrounding pieces split into focused components and hooks:
 
-- typed input
-- voice dictation
 - camera capture
-- source cards
-- structured context panels
-- spoken answer playback
-- install-to-home-screen support as a PWA
+- speech recognition
+- compact source cards
+- answer playback
+- install prompt
+- local profile management
 
 ### Edge functions
 
-Otto uses two Supabase edge functions:
+The backend is intentionally small and focused:
 
 - `supabase/functions/otto-analyze`
-  Interprets each user turn, decides whether research is needed, runs Gemini + Firecrawl, and returns a grounded answer.
+  Handles interpretation, Gemini prompting, optional Firecrawl research, and grounded answer synthesis.
 - `supabase/functions/otto-voice`
-  Generates in-app spoken audio for Otto responses using ElevenLabs.
+  Converts Otto responses into in-app speech using ElevenLabs, with speech formatting normalized for time and currency.
 
-### Data layer
+### Data model
 
-Otto stores:
+Otto no longer depends on user auth or a remote profile table for the core experience.
 
-- onboarding and profile defaults locally in the browser
-- session context in memory during the active chat
-- secrets and hosted functions in Supabase
+- user profile defaults are stored locally in the browser
+- active conversation context is stored in memory during the session
+- Supabase is used for edge functions and secrets
 
-## Demo Flow
+That keeps the demo fast and reduces operational drag during judging.
 
-A strong demo usually shows all three layers of the product:
+## Codebase Layout
 
-1. Start with the camera:
-   `What is this item?`
-2. Move to practical value:
-   `How much does it cost, and are there cheaper alternatives nearby or online?`
-3. Show local discovery:
-   `Find the nearest vegetarian restaurants and tell me which one looks strongest.`
+```text
+src/
+  app/                 app shell and navigation
+  features/account/    local profile and settings
+  features/install/    one-time mobile install prompt
+  features/onboarding/ onboarding flow
+  features/otto/       chat, camera, dictation, sources, playback
+  shared/              speech helpers and Supabase client setup
 
-That sequence makes the product story clear:
+supabase/
+  functions/
+    otto-analyze/      reasoning + research pipeline
+    otto-voice/        speech synthesis pipeline
+```
 
-- Otto sees the world
-- Otto researches the world
-- Otto helps the user decide
+## Mobile App Behavior
 
-## Mobile App Experience
+Otto is installable as a PWA:
 
-Otto is installable as a mobile web app.
+- Android browsers can trigger the native install flow
+- iPhone Safari shows a one-time Add to Home Screen prompt
+- the prompt appears once and stays out of the way after dismissal or install
 
-- Android browsers can trigger the native install flow.
-- iPhone Safari shows a one-time Add to Home Screen prompt.
-- The prompt appears once and stays out of the way after dismissal or install.
-
-This makes Otto demo much closer to a dedicated mobile app than a browser tab.
-
-## Tech Stack
-
-- Frontend: React, TypeScript, Vite, Framer Motion
-- Backend: Supabase Edge Functions
-- Reasoning: Gemini
-- Research: Firecrawl
-- Voice: ElevenLabs
+That makes the experience feel much closer to a real mobile app than a normal browser page, which matters in a short demo.
 
 ## Local Development
 
@@ -165,6 +187,8 @@ npm run build
 
 ## Environment Variables
 
+Create a local `.env` from `.env.example`.
+
 Frontend:
 
 - `VITE_SUPABASE_URL`
@@ -183,6 +207,13 @@ Supabase function secrets:
 
 ## What Makes Otto Different
 
-Otto is not just a chat UI and not just a camera demo.
+Otto is not trying to be a general-purpose assistant for everything. It is designed for practical questions tied to the physical world around the user.
 
-It connects perception, live research, comparison, and spoken assistance into one mobile product. The result is an assistant that can help with the messy, practical questions people ask while they are moving through the real world.
+The combination matters:
+
+- camera input for context
+- live research for freshness
+- comparison for decision quality
+- spoken output for usability on the move
+
+That is the core of the product, and it is the lens that should be used to judge the project.
