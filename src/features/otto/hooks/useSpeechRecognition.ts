@@ -48,6 +48,41 @@ interface UseSpeechRecognitionOptions {
   paused?: boolean;
 }
 
+function normalizeTranscriptSegment(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function mergeTranscriptSegments(base: string, addition: string) {
+  const left = normalizeTranscriptSegment(base);
+  const right = normalizeTranscriptSegment(addition);
+
+  if (!left) {
+    return right;
+  }
+
+  if (!right || left === right) {
+    return left;
+  }
+
+  const leftWords = left.split(" ");
+  const rightWords = right.split(" ");
+  const overlapLimit = Math.min(leftWords.length, rightWords.length);
+  let overlapCount = 0;
+
+  for (let size = overlapLimit; size > 0; size -= 1) {
+    const leftSuffix = leftWords.slice(-size).join(" ").toLowerCase();
+    const rightPrefix = rightWords.slice(0, size).join(" ").toLowerCase();
+
+    if (leftSuffix === rightPrefix) {
+      overlapCount = size;
+      break;
+    }
+  }
+
+  const remainder = rightWords.slice(overlapCount).join(" ");
+  return remainder ? `${left} ${remainder}` : left;
+}
+
 export function useSpeechRecognition({
   onSilence,
   silenceMs = 1600,
@@ -135,21 +170,25 @@ export function useSpeechRecognition({
     recognition.lang = "en-US";
 
     recognition.onresult = (event: BrowserSpeechRecognitionEvent) => {
-      let nextFinalTranscript = finalTranscriptRef.current;
+      let nextFinalTranscript = "";
       let interimTranscript = "";
 
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const text = event.results[i][0].transcript;
+      for (let i = 0; i < event.results.length; i += 1) {
+        const text = normalizeTranscriptSegment(event.results[i][0].transcript);
+
+        if (!text) {
+          continue;
+        }
 
         if (event.results[i].isFinal) {
-          nextFinalTranscript = `${nextFinalTranscript} ${text}`.trim();
+          nextFinalTranscript = mergeTranscriptSegments(nextFinalTranscript, text);
         } else {
-          interimTranscript = `${interimTranscript} ${text}`.trim();
+          interimTranscript = mergeTranscriptSegments(interimTranscript, text);
         }
       }
 
       finalTranscriptRef.current = nextFinalTranscript;
-      transcriptRef.current = [nextFinalTranscript, interimTranscript].filter(Boolean).join(" ").trim();
+      transcriptRef.current = mergeTranscriptSegments(nextFinalTranscript, interimTranscript);
       setTranscript(transcriptRef.current);
 
       if (transcriptRef.current) {

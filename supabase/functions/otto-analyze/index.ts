@@ -310,19 +310,8 @@ function shouldForceWebSearch(query: string) {
     .test(query);
 }
 
-function isHospitalityQuery(value: string) {
-  return /(restaurant|restraunt|hotel|resort|inn|motel|hostel|cafe|café|bar|pub|bistro|diner|reservation|booking|book a table|table for|room|suite|check-in|check in|check-out|check out|stay)/i
-    .test(value);
-}
-
-function shouldBiasCallIntent(query: string, usedVision: boolean, sessionContext: OttoSessionContext) {
-  const combined = [query, sessionContext.activeSubject, sessionContext.summary].filter(Boolean).join(" ");
-
-  if (isHospitalityQuery(combined)) {
-    return true;
-  }
-
-  return usedVision;
+function userExplicitlyRequestedCall(query: string) {
+  return /\bcall\b/i.test(query);
 }
 
 function isConversationalTurn(query: string, usedVision: boolean) {
@@ -586,18 +575,21 @@ function normalizeInterpretation(
       ? data.needsWebSearch
       : shouldForceWebSearch(fallbackQuery);
   const conversationalTurn = isConversationalTurn(fallbackQuery, usedVision);
-  const callBias = shouldBiasCallIntent(fallbackQuery, usedVision, sessionContext);
+  const explicitCallRequest = userExplicitlyRequestedCall(fallbackQuery);
   const searchMode =
     data.searchMode === "search" || data.searchMode === "none"
       ? data.searchMode
-      : needsWebSearch || callBias
+      : needsWebSearch || explicitCallRequest
         ? "search"
         : "none";
-  const intentKind = data.intentKind === "call_verification" || data.intentKind === "call_booking"
+  const inferredIntentKind = data.intentKind === "call_verification" || data.intentKind === "call_booking"
     ? data.intentKind
-    : callBias
+    : explicitCallRequest
       ? "call_verification"
       : "answer";
+  const intentKind = explicitCallRequest
+    ? inferredIntentKind
+    : "answer";
 
   return {
     subject: cleanText(data.subject, fallbackSubject),
@@ -608,8 +600,8 @@ function normalizeInterpretation(
     ),
     userIntent: cleanText(data.userIntent, fallbackQuery || "Continue helping with the current walk."),
     confidence,
-    needsWebSearch: conversationalTurn ? false : needsWebSearch || shouldForceWebSearch(fallbackQuery) || callBias,
-    searchMode: conversationalTurn ? "none" : (searchMode === "none" && callBias ? "search" : searchMode),
+    needsWebSearch: conversationalTurn ? false : needsWebSearch || shouldForceWebSearch(fallbackQuery) || explicitCallRequest,
+    searchMode: conversationalTurn ? "none" : (searchMode === "none" && explicitCallRequest ? "search" : searchMode),
     searchQuery,
     detailHints: cleanStringArray(data.detailHints),
     intentKind,
@@ -906,8 +898,8 @@ function buildSourceActions(subject: string, searchQuery: string, sources: Searc
   return actions.slice(0, 3);
 }
 
-function ensureCallPrompt(answer: string, proposal: OttoCallProposal | null) {
-  if (!proposal) {
+function ensureCallPrompt(answer: string, proposal: OttoCallProposal | null, allowCallPrompt: boolean) {
+  if (!proposal || !allowCallPrompt) {
     return answer;
   }
 
@@ -938,7 +930,8 @@ function normalizeSynthesis(
   const data = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
   const createdAt = new Date().toISOString();
   const messageId = generateId("msg");
-  const callProposal = normalizeCallProposal(data.callProposal, sources, profile);
+  const explicitCallRequest = userExplicitlyRequestedCall(query);
+  const callProposal = explicitCallRequest ? normalizeCallProposal(data.callProposal, sources, profile) : null;
   const answer = ensureCallPrompt(cleanText(
     data.answer,
     callProposal
@@ -946,7 +939,7 @@ function normalizeSynthesis(
       : usedWebSearch
         ? "I found relevant information, but I could not confidently summarize it. Try narrowing the question."
         : "I could interpret the scene, but I could not confidently produce a full answer. Try a more specific follow-up."
-  ), callProposal);
+  ), callProposal, explicitCallRequest);
 
   const cleanedStructuredDetails = (Array.isArray(data.structuredDetails) ? data.structuredDetails : [])
     .map((entry) => {
@@ -1322,8 +1315,8 @@ serve(async (req) => {
         [
           "You are Otto, a mobile AI walking companion and cloud call planner.",
           "Interpret the current user turn using the current frame when available, plus session memory and the user's stored profile context.",
-          "Use call_verification or call_booking when a live call would materially improve the outcome over research alone.",
-          "For restaurants, hotels, cafes, bars, reservations, bookings, or image-based place questions, strongly prefer call_verification when a call could check live details.",
+          "Use call_verification or call_booking only when the current user query explicitly asks for a call.",
+          "If the query does not explicitly contain the word 'call', do not choose a call intent just because the topic is restaurants, hotels, bookings, or another live business question.",
           "Firecrawl is the only retrieval layer. There is no browser automation.",
           "Choose web retrieval when external, fresh, contact, or verification information is needed.",
           "For greetings, thanks, acknowledgements, confirmations, and other lightweight conversational turns, do not request web search.",
@@ -1387,8 +1380,8 @@ serve(async (req) => {
           "You are Otto, a concise walking companion and cloud call planner.",
           "Answer the current turn using the current frame, session memory, user profile defaults, and Firecrawl evidence.",
           "If there is no Firecrawl evidence and the turn is lightweight conversation, reply naturally and briefly without implying that research happened.",
-          "If a call would help more than research alone, return a callProposal with the target, phone number, exact reason, and question list.",
-          "For restaurants, hotels, cafes, bars, reservations, bookings, or image-led place questions, prefer returning a callProposal when Firecrawl gives a plausible business phone.",
+          "Return a callProposal only when the current user query explicitly contains the word 'call'.",
+          "If the query does not explicitly contain the word 'call', do not return a callProposal even for restaurants, hotels, bookings, or image-led place questions.",
           "When you return a callProposal, your answer should naturally lead into asking whether Otto should make the call and check.",
           "Only return callProposal when the phone number is plausible from Firecrawl-backed evidence.",
           "followUpActions must only contain callback_user.",
