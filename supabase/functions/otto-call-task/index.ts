@@ -52,6 +52,10 @@ serve(async (req) => {
     }
 
     const serviceClient = createServiceClient();
+    const customerContext = {
+      fullName: cleanText(profile.full_name) || null,
+      callbackPhone: profile.callback_phone,
+    };
     const approvedScope = cleanStringArray(
       [
         proposal.callReason,
@@ -84,6 +88,7 @@ serve(async (req) => {
           callbackPhone: profile.callback_phone,
           callBriefingEnabled: true,
           callTargetEmail: proposal.callTargetEmail,
+          customerContext,
           conversationLog: [],
         },
         inbox_state: "active",
@@ -113,6 +118,10 @@ serve(async (req) => {
           callReason: proposal.callReason,
           questions: proposal.callQuestions,
           firecrawlEvidence: proposal.firecrawlEvidence,
+          requestQuery: cleanText(query, proposal.summary),
+          subject: cleanText(subject, proposal.callTargetName),
+          approvedScope,
+          customerContext,
         },
       },
       {

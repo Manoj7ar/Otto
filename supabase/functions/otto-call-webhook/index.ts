@@ -19,10 +19,16 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const OTTO_WEBHOOK_SECRET = Deno.env.get("OTTO_WEBHOOK_SECRET") ?? "";
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GOOGLE_API_KEY");
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
+const MAX_CALL_TURNS = 5;
 
-interface GeminiDecision {
+interface CustomerContext {
+  fullName: string | null;
+  callbackPhone: string | null;
+}
+
+interface GeminiCallPlan {
   status: "continue" | "complete" | "failed";
-  nextQuestion: string;
+  assistantReply: string;
   resultSummary: string;
 }
 
@@ -30,10 +36,10 @@ const decisionSchema = {
   type: "OBJECT",
   properties: {
     status: { type: "STRING", enum: ["continue", "complete", "failed"] },
-    nextQuestion: { type: "STRING" },
+    assistantReply: { type: "STRING" },
     resultSummary: { type: "STRING" },
   },
-  required: ["status", "nextQuestion", "resultSummary"],
+  required: ["status", "assistantReply", "resultSummary"],
 };
 
 function xml(text: string) {
@@ -70,6 +76,52 @@ function buildGatherResponse(taskId: string, prompt: string, turn: number) {
   );
 }
 
+function cleanStringArray(value: unknown, limit = 8) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => cleanText(entry))
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function readCustomerContext(payload: Record<string, unknown> | null | undefined, fallbackPhone: string | null): CustomerContext {
+  const raw = typeof payload?.customerContext === "object" && payload.customerContext !== null
+    ? payload.customerContext as Record<string, unknown>
+    : {};
+
+  return {
+    fullName: cleanText(raw.fullName) || null,
+    callbackPhone: cleanText(raw.callbackPhone, fallbackPhone ?? "") || null,
+  };
+}
+
+function appendConversationEntry(
+  conversationLog: Array<{ role: "agent" | "business"; text: string; at: string }>,
+  role: "agent" | "business",
+  text: string,
+) {
+  const cleaned = cleanText(text);
+
+  if (!cleaned) {
+    return;
+  }
+
+  const lastEntry = conversationLog[conversationLog.length - 1];
+
+  if (lastEntry?.role === role && lastEntry.text === cleaned) {
+    return;
+  }
+
+  conversationLog.push({
+    role,
+    text: cleaned,
+    at: new Date().toISOString(),
+  });
+}
+
 function getGeminiText(response: unknown): string {
   const data = typeof response === "object" && response !== null ? response as Record<string, unknown> : {};
   const candidates = Array.isArray(data.candidates) ? data.candidates : [];
@@ -97,7 +149,20 @@ function getGeminiText(response: unknown): string {
   return text;
 }
 
-async function callGeminiDecision(summary: string, conversationLog: unknown[], latestSpeech: string, questions: string[]): Promise<GeminiDecision> {
+async function callGeminiDecision(
+  task: {
+    subject: string;
+    call_goal: string;
+    request_query: string;
+    approved_scope: string[];
+    source_snapshot: unknown;
+  },
+  summary: string,
+  conversationLog: unknown[],
+  latestSpeech: string,
+  questions: string[],
+  customerContext: CustomerContext,
+): Promise<GeminiCallPlan> {
   if (!GEMINI_API_KEY) {
     throw new HttpError(500, "GEMINI_API_KEY not configured.");
   }
@@ -111,10 +176,16 @@ async function callGeminiDecision(summary: string, conversationLog: unknown[], l
         systemInstruction: {
           parts: [{
             text: [
-              "You are Otto, a conservative phone agent.",
+              "You are Otto, a conservative phone agent speaking to a business on behalf of a user.",
               "Decide whether to continue, complete, or fail the business call.",
-              "Stay focused on the approved call reason and question list only.",
-              "Return continue only when one short follow-up question is genuinely needed.",
+              "Listen to what the business just said and answer naturally when they ask for known booking or contact details.",
+              "You may only state facts that are explicitly present in approved scope, request query, task context, customer context, Firecrawl evidence, or prior business replies.",
+              "Never hallucinate a booking detail, party size, date, time, email, phone number, or customer name.",
+              "If the business asks for a detail you do not know, say that you do not have that detail yet and ask whether they can proceed without it or suggest a callback.",
+              "If the business asks for the booking contact number and customerContext.callbackPhone exists, provide that exact number.",
+              "If the business asks for the customer name and customerContext.fullName exists, provide that exact name.",
+              "assistantReply must be a short spoken line for the next thing Otto should say on the call.",
+              "Use status=continue when another exchange is needed, complete when the goal has been answered or the booking is done, and failed when the call is blocked or cannot proceed safely.",
             ].join("\n"),
           }],
         },
@@ -122,8 +193,16 @@ async function callGeminiDecision(summary: string, conversationLog: unknown[], l
           role: "user",
           parts: [{
             text: JSON.stringify({
+              task: {
+                subject: task.subject,
+                callGoal: task.call_goal,
+                requestQuery: task.request_query,
+                approvedScope: task.approved_scope,
+                sourceSnapshot: task.source_snapshot,
+              },
               approvedSummary: summary,
               callQuestions: questions,
+              customerContext,
               priorConversation: conversationLog,
               latestSpeech,
             }),
@@ -147,11 +226,11 @@ async function callGeminiDecision(summary: string, conversationLog: unknown[], l
 
   const payload = await response.json();
   const text = getGeminiText(payload);
-  const parsed = JSON.parse(text) as GeminiDecision;
+  const parsed = JSON.parse(text) as GeminiCallPlan;
 
   return {
     status: parsed.status === "complete" || parsed.status === "failed" ? parsed.status : "continue",
-    nextQuestion: cleanText(parsed.nextQuestion),
+    assistantReply: cleanText(parsed.assistantReply),
     resultSummary: cleanText(parsed.resultSummary),
   };
 }
@@ -225,21 +304,29 @@ serve(async (req) => {
       throw new HttpError(404, "No business call step is associated with this task.");
     }
 
+    const callPayload =
+      typeof callStep.payload === "object" && callStep.payload !== null
+        ? callStep.payload as Record<string, unknown>
+        : {};
+    const callQuestions = cleanStringArray(callPayload.questions, 6);
+    const customerContext = readCustomerContext(callPayload, cleanText(task.metadata?.callbackPhone) || null);
+
     if (step === "intro") {
-      const callQuestions = Array.isArray(callStep.payload?.questions)
-        ? (callStep.payload.questions as unknown[]).map((entry) => cleanText(entry)).filter(Boolean).slice(0, 2)
-        : [];
+      const customerName = customerContext.fullName ? ` for ${customerContext.fullName}` : " for a customer";
       const prompt = callQuestions.length > 0
-        ? `Hello, this is Otto calling for a customer. I am verifying ${task.call_goal}. I specifically need to confirm ${callQuestions.join(" and ")}. Can you help me with that?`
-        : `Hello, this is Otto calling for a customer. ${callStep.approval_summary ?? task.call_goal}. Can you help me with that?`;
+        ? `Hello, this is Otto calling${customerName}. I am calling about ${task.call_goal}. I need to confirm ${callQuestions.join(" and ")}. Can you help me with that?`
+        : `Hello, this is Otto calling${customerName}. ${callStep.approval_summary ?? task.call_goal}. Can you help me with that?`;
+      const conversationLog = getConversationLog(task);
+
+      appendConversationEntry(conversationLog, "agent", prompt);
 
       await client.from("otto_task_steps").update({ status: "running" }).eq("id", callStep.id);
-      await client.from("otto_tasks").update({
+      await persistConversationLog(client, task, conversationLog, {
         status: "in_progress",
         inbox_state: "active",
         latest_step_label: callStep.title,
         latest_summary: callStep.approval_summary ?? callStep.title,
-      }).eq("id", taskId);
+      });
 
       return buildGatherResponse(taskId, prompt, 1);
     }
@@ -279,16 +366,9 @@ serve(async (req) => {
     const form = await req.formData();
     const latestSpeech = cleanText(form.get("SpeechResult"));
     const conversationLog = getConversationLog(task);
-    const callQuestions = Array.isArray(callStep.payload?.questions)
-      ? (callStep.payload.questions as unknown[]).map((entry) => cleanText(entry)).filter(Boolean)
-      : [];
 
     if (latestSpeech) {
-      conversationLog.push({
-        role: "business",
-        text: latestSpeech,
-        at: new Date().toISOString(),
-      });
+      appendConversationEntry(conversationLog, "business", latestSpeech);
     }
 
     if (!latestSpeech && turn >= 2) {
@@ -315,27 +395,44 @@ serve(async (req) => {
       return buildGatherResponse(taskId, "I did not catch that. Could you repeat that once more?", turn + 1);
     }
 
-    const decision = await callGeminiDecision(callStep.approval_summary ?? task.call_goal, conversationLog, latestSpeech, callQuestions);
+    const decision = await callGeminiDecision(
+      {
+        subject: task.subject,
+        call_goal: task.call_goal,
+        request_query: task.request_query,
+        approved_scope: task.approved_scope,
+        source_snapshot: task.source_snapshot,
+      },
+      callStep.approval_summary ?? task.call_goal,
+      conversationLog,
+      latestSpeech,
+      callQuestions,
+      customerContext,
+    );
 
-    if (decision.status === "continue" && turn < 3 && decision.nextQuestion) {
-      conversationLog.push({
-        role: "agent",
-        text: decision.nextQuestion,
-        at: new Date().toISOString(),
+    if (decision.status === "continue" && turn < MAX_CALL_TURNS && decision.assistantReply) {
+      appendConversationEntry(conversationLog, "agent", decision.assistantReply);
+
+      await persistConversationLog(client, task, conversationLog, {
+        latest_summary: cleanText(decision.resultSummary, task.latest_summary ?? callStep.title),
       });
 
-      await persistConversationLog(client, task, conversationLog);
-
-      return buildGatherResponse(taskId, decision.nextQuestion, turn + 1);
+      return buildGatherResponse(taskId, decision.assistantReply, turn + 1);
     }
 
-    const finalStatus = decision.status === "failed" ? "failed" : "completed";
+    const reachedTurnLimit = decision.status === "continue";
+    const finalStatus = decision.status === "failed" || reachedTurnLimit ? "failed" : "completed";
     const finalSummary = cleanText(
       decision.resultSummary,
       finalStatus === "completed"
         ? "The business call completed successfully."
-        : "The business call stopped without a clear outcome.",
+        : reachedTurnLimit
+          ? "The business call reached Otto's safe turn limit before a clear outcome was confirmed."
+          : "The business call stopped without a clear outcome.",
     );
+    const closingReply = reachedTurnLimit
+      ? "Thank you. I need to stop here and follow up another way. Goodbye."
+      : cleanText(decision.assistantReply, "Thank you. That is all I needed today. Goodbye.");
 
     await client.from("otto_task_steps").update({
       status: finalStatus,
@@ -355,7 +452,7 @@ serve(async (req) => {
     await executeTaskChain(taskId);
 
     return xml(
-      `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl("Thank you. That is all I needed today. Goodbye."))}</Play><Hangup/></Response>`,
+      `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl(closingReply))}</Play><Hangup/></Response>`,
     );
   } catch (error) {
     console.error("otto_call_webhook_error", error);
