@@ -31,12 +31,12 @@ export default function SourceCard({ source }: SourceCardProps) {
 
   return (
     <details className="group overflow-hidden rounded-[0.95rem] border border-black/10 bg-white/30 open:bg-white/38 sm:rounded-[1.2rem]">
-      <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 sm:px-4 sm:py-3">
+      <summary className="flex cursor-pointer list-none items-start justify-between gap-2.5 px-3 py-2.5 sm:px-4 sm:py-3">
         <div className="min-w-0">
           <p className="text-[10px] uppercase tracking-[0.18em] text-secondary-otto">
             {siteLabel}
           </p>
-          <p className="mt-1 text-sm font-medium leading-5 text-foreground sm:leading-6">
+          <p className="mt-1 break-words text-sm font-medium leading-5 text-foreground sm:leading-6">
             {source.title}
           </p>
         </div>
@@ -83,7 +83,7 @@ export default function SourceCard({ source }: SourceCardProps) {
           href={source.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="glass-button mt-3 inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-medium sm:mt-4"
+          className="glass-button mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full px-3 py-2.5 text-xs font-medium sm:mt-4 sm:w-auto"
         >
           Open source
           <ArrowUpRight size={13} />
