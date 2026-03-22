@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ExternalLink, History, Paperclip, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import type { ProfileRow } from "@/features/account/profile";
+import { normalizeSpeechText } from "@/shared/speech/normalizeSpeechText";
 import { approveOttoTask } from "../api/approveOttoTask";
 import { fetchOttoVoice } from "../api/fetchOttoVoice";
 import { submitOttoTurn } from "../api/submitOttoTurn";
@@ -147,12 +148,14 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
   const hasSessionTurns = sessionContext.turns.length > 0;
 
   const fallbackSpeak = useCallback((text: string) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window) || !text.trim()) {
+    const spokenText = normalizeSpeechText(text);
+
+    if (typeof window === "undefined" || !("speechSynthesis" in window) || !spokenText.trim()) {
       return;
     }
 
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
+    const utterance = new SpeechSynthesisUtterance(spokenText);
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);

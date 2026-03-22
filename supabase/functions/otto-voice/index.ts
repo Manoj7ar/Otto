@@ -8,6 +8,7 @@ import {
   persistCallRuntimeState,
   type ConciergeTaskRow,
 } from "../_shared/otto-concierge.ts";
+import { normalizeSpeechText } from "../_shared/normalize-speech.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -99,6 +100,8 @@ async function synthesize(text: string, mode: VoiceMode) {
     throw new HttpError(500, "ElevenLabs voice id not configured.");
   }
 
+  const spokenText = normalizeSpeechText(text);
+
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=mp3_44100_128`, {
     method: "POST",
     headers: {
@@ -106,7 +109,7 @@ async function synthesize(text: string, mode: VoiceMode) {
       "xi-api-key": ELEVENLABS_API_KEY,
     },
     body: JSON.stringify({
-      text,
+      text: spokenText,
       model_id: ELEVENLABS_MODEL_ID,
       voice_settings: {
         stability: 0.45,
