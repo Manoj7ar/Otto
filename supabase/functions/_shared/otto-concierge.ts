@@ -89,6 +89,14 @@ export interface CallRuntimeCloseAttempt {
   at: string | null;
 }
 
+export interface CallbackRuntimeState {
+  phase: "idle" | "briefing" | "waiting_for_user" | "heard_user" | "replying" | "completed" | "silent" | "failed";
+  userSpeech: string | null;
+  assistantReply: string | null;
+  resultSummary: string | null;
+  at: string | null;
+}
+
 export interface CallRuntimeEvent {
   at: string;
   level: "info" | "warn" | "error";
@@ -104,6 +112,7 @@ export interface CallRuntimeState {
   knownFacts: CallRuntimeFact[];
   pendingChecks: string[];
   closeAttempt: CallRuntimeCloseAttempt;
+  callback: CallbackRuntimeState;
   lastError: CallRuntimeEvent | null;
   events: CallRuntimeEvent[];
 }
@@ -233,6 +242,28 @@ function normalizeCloseAttempt(value: unknown): CallRuntimeCloseAttempt {
   };
 }
 
+function normalizeCallbackRuntime(value: unknown): CallbackRuntimeState {
+  const row = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  const phase =
+    row.phase === "briefing" ||
+      row.phase === "waiting_for_user" ||
+      row.phase === "heard_user" ||
+      row.phase === "replying" ||
+      row.phase === "completed" ||
+      row.phase === "silent" ||
+      row.phase === "failed"
+      ? row.phase
+      : "idle";
+
+  return {
+    phase,
+    userSpeech: cleanText(row.userSpeech) || null,
+    assistantReply: cleanText(row.assistantReply) || null,
+    resultSummary: cleanText(row.resultSummary) || null,
+    at: cleanText(row.at) || null,
+  };
+}
+
 export function normalizePhone(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) {
     return null;
@@ -259,6 +290,7 @@ export function getCallRuntimeState(task: Pick<ConciergeTaskRow, "metadata">): C
     knownFacts: normalizeCallRuntimeFacts(raw.knownFacts),
     pendingChecks: cleanStringArray(raw.pendingChecks, 12),
     closeAttempt: normalizeCloseAttempt(raw.closeAttempt),
+    callback: normalizeCallbackRuntime(raw.callback),
     lastError,
     events,
   };
@@ -335,6 +367,7 @@ export async function appendCallRuntimeEvent(
     phase?: string;
     knownFacts?: CallRuntimeFact[];
     pendingChecks?: string[];
+    callback?: CallbackRuntimeState;
     clearLastError?: boolean;
     taskUpdates?: Record<string, unknown>;
   } = {},
@@ -345,6 +378,7 @@ export async function appendCallRuntimeEvent(
     knownFacts: options.knownFacts ?? current.knownFacts,
     pendingChecks: options.pendingChecks ?? current.pendingChecks,
     closeAttempt: current.closeAttempt,
+    callback: options.callback ?? current.callback,
     lastError: options.clearLastError
       ? null
       : event.level === "error"

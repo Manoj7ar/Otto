@@ -10,6 +10,7 @@ import {
   getConversationLog,
   HttpError,
   persistTaskState,
+  type CallbackRuntimeState,
   type CallRuntimeFact,
   type CallRuntimeState,
   type ConciergeTaskRow,
@@ -26,6 +27,8 @@ const OTTO_WEBHOOK_SECRET = Deno.env.get("OTTO_WEBHOOK_SECRET") ?? "";
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") ?? Deno.env.get("GOOGLE_API_KEY");
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-2.5-flash";
 const MAX_CALL_TURNS = 5;
+const BUSINESS_SILENCE_TIMEOUT_SECONDS = 8;
+const CALLBACK_SILENCE_TIMEOUT_SECONDS = 5;
 
 type CallPhase = "intro" | "capability_check" | "booking_details" | "follow_up" | "close";
 
@@ -41,6 +44,11 @@ interface GeminiCallPlan {
   resultSummary: string;
   knownFacts: Array<{ key: string; value: string }>;
   pendingChecks: string[];
+}
+
+interface GeminiCallbackReply {
+  assistantReply: string;
+  resultSummary: string;
 }
 
 const decisionSchema = {
@@ -67,6 +75,15 @@ const decisionSchema = {
     },
   },
   required: ["status", "phase", "assistantReply", "resultSummary", "knownFacts", "pendingChecks"],
+};
+
+const callbackReplySchema = {
+  type: "OBJECT",
+  properties: {
+    assistantReply: { type: "STRING" },
+    resultSummary: { type: "STRING" },
+  },
+  required: ["assistantReply", "resultSummary"],
 };
 
 function xml(text: string) {
@@ -104,12 +121,27 @@ function buildVoiceUrl(text: string, mode: "call" | "callback" = "call", taskId?
   return url.toString();
 }
 
-function buildGatherResponse(taskId: string, prompt: string, turn: number, phase: CallPhase) {
+function buildBusinessGatherResponse(taskId: string, prompt: string, turn: number, phase: CallPhase) {
   const actionUrl =
     `${SUPABASE_URL}/functions/v1/otto-call-webhook?taskId=${encodeURIComponent(taskId)}&token=${encodeURIComponent(OTTO_WEBHOOK_SECRET)}&step=gather&turn=${turn}`;
 
   return xml(
-    `<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech" speechTimeout="auto" timeout="5" actionOnEmptyResult="true" method="POST" action="${escapeXml(actionUrl)}" language="en-US"><Play>${escapeXml(buildVoiceUrl(prompt, "call", taskId, phase))}</Play></Gather></Response>`,
+    `<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech" speechTimeout="auto" timeout="${BUSINESS_SILENCE_TIMEOUT_SECONDS}" actionOnEmptyResult="true" method="POST" action="${escapeXml(actionUrl)}" language="en-US"><Play>${escapeXml(buildVoiceUrl(prompt, "call", taskId, phase))}</Play></Gather></Response>`,
+  );
+}
+
+function buildCallbackGatherResponse(taskId: string, stepId: string, prompt: string) {
+  const actionUrl =
+    `${SUPABASE_URL}/functions/v1/otto-call-webhook?taskId=${encodeURIComponent(taskId)}&token=${encodeURIComponent(OTTO_WEBHOOK_SECRET)}&step=callback-gather&stepId=${encodeURIComponent(stepId)}`;
+
+  return xml(
+    `<?xml version="1.0" encoding="UTF-8"?><Response><Gather input="speech" speechTimeout="auto" timeout="${CALLBACK_SILENCE_TIMEOUT_SECONDS}" actionOnEmptyResult="true" method="POST" action="${escapeXml(actionUrl)}" language="en-US"><Play>${escapeXml(buildVoiceUrl(prompt, "callback", taskId, "callback"))}</Play></Gather></Response>`,
+  );
+}
+
+function buildPlayAndHangupResponse(taskId: string, text: string, phase: string, mode: "call" | "callback") {
+  return xml(
+    `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl(text, mode, taskId, phase))}</Play><Hangup/></Response>`,
   );
 }
 
@@ -239,6 +271,21 @@ function buildCloseAttempt(
     status,
     finalStepStatus,
     finalSummary: cleanText(finalSummary) || null,
+    at: new Date().toISOString(),
+  };
+}
+
+function buildCallbackState(
+  phase: CallbackRuntimeState["phase"],
+  userSpeech: string | null = null,
+  assistantReply: string | null = null,
+  resultSummary: string | null = null,
+): CallbackRuntimeState {
+  return {
+    phase,
+    userSpeech: cleanText(userSpeech) || null,
+    assistantReply: cleanText(assistantReply) || null,
+    resultSummary: cleanText(resultSummary) || null,
     at: new Date().toISOString(),
   };
 }
@@ -418,6 +465,72 @@ async function callGeminiDecision(
   };
 }
 
+async function callGeminiCallbackReply(
+  task: ConciergeTaskRow,
+  callbackScript: string,
+  latestSpeech: string,
+): Promise<GeminiCallbackReply> {
+  if (!GEMINI_API_KEY) {
+    throw new HttpError(500, "GEMINI_API_KEY not configured.");
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{
+            text: [
+              "You are Otto calling a user back after finishing a task.",
+              "Reply with one short spoken response only.",
+              "Use only the task result summary, latest task summary, callback script, and the user's callback speech.",
+              "Do not ask another question.",
+              "Do not promise new actions or restart the task.",
+              "Sound calm, helpful, and concise.",
+              "assistantReply must be plain spoken dialogue only.",
+              "resultSummary must be a short internal summary of the callback outcome.",
+            ].join("\n"),
+          }],
+        },
+        contents: [{
+          role: "user",
+          parts: [{
+            text: JSON.stringify({
+              taskSummary: cleanText(task.result_summary, task.latest_summary ?? "The task has finished."),
+              latestSummary: cleanText(task.latest_summary),
+              callbackScript,
+              latestSpeech,
+            }),
+          }],
+        }],
+        generationConfig: {
+          temperature: 0.2,
+          candidateCount: 1,
+          maxOutputTokens: 180,
+          responseMimeType: "application/json",
+          responseSchema: callbackReplySchema,
+        },
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    console.error("gemini_callback_reply_error", response.status, await response.text());
+    throw new HttpError(502, "Gemini could not prepare the callback reply.");
+  }
+
+  const payload = await response.json();
+  const text = getGeminiText(payload);
+  const parsed = JSON.parse(text) as GeminiCallbackReply;
+
+  return {
+    assistantReply: cleanText(parsed.assistantReply, "Thanks, I heard that. Goodbye."),
+    resultSummary: cleanText(parsed.resultSummary, "Callback user spoke and Otto replied once."),
+  };
+}
+
 serve(async (req) => {
   let taskId: string | null = null;
   let step = "";
@@ -464,11 +577,12 @@ serve(async (req) => {
         createCallRuntimeEvent("info", "webhook", "callback", "Serving callback voice script.", {
           callbackStepId: callbackStep.id,
         }),
+        {
+          callback: buildCallbackState("waiting_for_user", null, null, "Callback briefing delivered."),
+        },
       );
 
-      return xml(
-        `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl(script, "callback", taskId, "callback"))}</Play><Hangup/></Response>`,
-      );
+      return buildCallbackGatherResponse(taskId, callbackStep.id, script);
     }
 
     if (step === "callback-status") {
@@ -485,18 +599,46 @@ serve(async (req) => {
       const form = await req.formData();
       const details = formDataToObject(form);
       const callStatus = cleanText(form.get("CallStatus"));
+      const currentRuntime = getCallRuntimeState(task);
+      const callbackRuntime = currentRuntime.callback;
 
       if (callStatus === "completed") {
+        const callbackResultSummary =
+          cleanText(
+            callbackRuntime.resultSummary,
+            callbackRuntime.userSpeech
+              ? "Callback briefing delivered and Otto replied once."
+              : "Callback briefing delivered.",
+          );
+
         await client.from("otto_task_steps").update({
           status: "completed",
-          result_summary: "Callback briefing delivered.",
+          result_summary: callbackResultSummary,
           completed_at: new Date().toISOString(),
         }).eq("id", callbackStep.id);
 
         await appendCallRuntimeEvent(
           client,
           task,
-          createCallRuntimeEvent("info", "twilio", "callback", "Callback briefing delivered.", details),
+          createCallRuntimeEvent(
+            "info",
+            "twilio",
+            "callback",
+            callbackRuntime.userSpeech ? "Callback completed after user follow-up." : "Callback briefing delivered.",
+            details,
+          ),
+          {
+            callback: buildCallbackState(
+              "completed",
+              callbackRuntime.userSpeech,
+              callbackRuntime.assistantReply,
+              callbackResultSummary,
+            ),
+            taskUpdates: {
+              latest_summary: callbackResultSummary,
+              result_summary: cleanText(task.result_summary, callbackResultSummary),
+            },
+          },
         );
       } else if (callStatus === "busy" || callStatus === "failed" || callStatus === "no-answer") {
         await client.from("otto_task_steps").update({
@@ -516,6 +658,14 @@ serve(async (req) => {
             details,
             cleanText(form.get("ErrorCode")) || callStatus.toUpperCase(),
           ),
+          {
+            callback: buildCallbackState(
+              "failed",
+              callbackRuntime.userSpeech,
+              callbackRuntime.assistantReply,
+              "Could not reach you for the callback briefing.",
+            ),
+          },
         );
       } else {
         await appendCallRuntimeEvent(
@@ -527,6 +677,91 @@ serve(async (req) => {
 
       await executeTaskChain(taskId);
       return new Response("ok", { headers: corsHeaders });
+    }
+
+    if (step === "callback-gather") {
+      activePhase = "callback";
+
+      if (!callbackStep) {
+        throw new HttpError(404, "No callback step is associated with this task.");
+      }
+
+      const form = await req.formData();
+      const details = formDataToObject(form);
+      const latestSpeech = cleanText(form.get("SpeechResult"));
+      const currentRuntime = getCallRuntimeState(task);
+      const script = cleanText(callbackStep.payload?.script, "Hi, this is Otto with your update. The task has finished.");
+
+      if (!latestSpeech) {
+        await appendCallRuntimeEvent(
+          client,
+          task,
+          createCallRuntimeEvent(
+            "info",
+            "webhook",
+            "callback",
+            "No speech was captured on the callback call before the silence timeout.",
+            details,
+            "CALLBACK_NO_SPEECH",
+          ),
+          {
+            callback: buildCallbackState("silent", null, null, "Callback briefing delivered."),
+          },
+        );
+
+        return xml(`<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`);
+      }
+
+      let callbackReply: GeminiCallbackReply;
+
+      try {
+        callbackReply = await callGeminiCallbackReply(task, script, latestSpeech);
+      } catch (error) {
+        const errorInfo = summarizeError(error);
+
+        await appendCallRuntimeEvent(
+          client,
+          task,
+          createCallRuntimeEvent(
+            "error",
+            "gemini",
+            "callback",
+            "Gemini callback reply planner failed. Falling back to a generic callback reply.",
+            {
+              error: errorInfo.message,
+              status: errorInfo.status,
+            },
+            errorInfo.code ?? "GEMINI_CALLBACK_REPLY_FAILED",
+          ),
+        );
+
+        callbackReply = {
+          assistantReply: "Thanks, I heard that. Goodbye.",
+          resultSummary: "Callback user spoke and Otto replied once.",
+        };
+      }
+
+      await appendCallRuntimeEvent(
+        client,
+        task,
+        createCallRuntimeEvent("info", "planner", "callback", "Prepared a single callback reply.", {
+          latestSpeech,
+          resultSummary: callbackReply.resultSummary,
+        }),
+        {
+          callback: buildCallbackState(
+            "replying",
+            latestSpeech,
+            callbackReply.assistantReply,
+            callbackReply.resultSummary,
+          ),
+          taskUpdates: {
+            latest_summary: callbackReply.resultSummary,
+          },
+        },
+      );
+
+      return buildPlayAndHangupResponse(taskId, callbackReply.assistantReply, "callback-follow-up", "callback");
     }
 
     if (!callStep) {
@@ -556,6 +791,7 @@ serve(async (req) => {
         knownFacts: buildSeedKnownFacts(task, customerContext),
         pendingChecks: callQuestions,
         closeAttempt: buildCloseAttempt(null, "completed", null, "none"),
+        callback: getCallRuntimeState(task).callback,
         lastError: null,
         events: [...getCallRuntimeState(task).events, introEvent].slice(-60),
       };
@@ -572,7 +808,7 @@ serve(async (req) => {
         },
       });
 
-      return buildGatherResponse(taskId, prompt, 1, "intro");
+      return buildBusinessGatherResponse(taskId, prompt, 1, "intro");
     }
 
     if (step === "status") {
@@ -657,6 +893,7 @@ serve(async (req) => {
               status: closingReplyServed ? "completed" : "interrupted",
               at: new Date().toISOString(),
             },
+            callback: currentRuntime.callback,
             lastError: finalStepStatus === "failed" ? currentRuntime.lastError : null,
             events: [...currentRuntime.events, finalEvent].slice(-60),
           };
@@ -746,13 +983,13 @@ serve(async (req) => {
       appendConversationEntry(conversationLog, "business", latestSpeech);
     }
 
-    if (!latestSpeech && turn >= 2) {
-      const closingReply = "No problem. I will stop here for now. Goodbye.";
+    if (!latestSpeech) {
+      const closingReply = "I did not hear anyone on the line, so I will end the call now. Goodbye.";
       const failureEvent = createCallRuntimeEvent(
         "error",
         "webhook",
         activePhase,
-        "The business line did not provide a clear spoken response.",
+        "The business line stayed silent through the no-speech window.",
         details,
         "NO_SPEECH",
       );
@@ -765,6 +1002,7 @@ serve(async (req) => {
           "failed",
           "The business line did not provide a clear spoken response.",
         ),
+        callback: currentRuntime.callback,
         lastError: failureEvent,
         events: [...currentRuntime.events, failureEvent].slice(-60),
       };
@@ -779,38 +1017,8 @@ serve(async (req) => {
           result_summary: "The business line did not provide a clear spoken response.",
         },
       });
-      return xml(
-        `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl(closingReply, "call", taskId, "close"))}</Play><Hangup/></Response>`,
-      );
-    }
 
-    if (!latestSpeech) {
-      const retryPrompt = "I did not catch that. Could you repeat that once more?";
-      appendConversationEntry(conversationLog, "agent", retryPrompt);
-
-      const retryEvent = createCallRuntimeEvent(
-        "warn",
-        "webhook",
-        activePhase,
-        "No speech was captured on the business line.",
-        details,
-        "EMPTY_GATHER",
-      );
-      const callRuntime: CallRuntimeState = {
-        phase: currentRuntime.phase,
-        knownFacts: currentRuntime.knownFacts,
-        pendingChecks: currentRuntime.pendingChecks,
-        closeAttempt: currentRuntime.closeAttempt,
-        lastError: currentRuntime.lastError,
-        events: [...currentRuntime.events, retryEvent].slice(-60),
-      };
-
-      await persistTaskState(client, task, {
-        conversationLog,
-        callRuntime,
-      });
-
-      return buildGatherResponse(taskId, retryPrompt, turn + 1, normalizePhase(activePhase, "follow_up"));
+      return buildPlayAndHangupResponse(taskId, closingReply, "close", "call");
     }
 
     let decision: GeminiCallPlan;
@@ -876,6 +1084,7 @@ serve(async (req) => {
         knownFacts,
         pendingChecks: decision.pendingChecks,
         closeAttempt: currentRuntime.closeAttempt,
+        callback: currentRuntime.callback,
         lastError: null,
         events: [...currentRuntime.events, plannerEvent].slice(-60),
       };
@@ -888,7 +1097,7 @@ serve(async (req) => {
         },
       });
 
-      return buildGatherResponse(taskId, decision.assistantReply, turn + 1, decision.phase);
+      return buildBusinessGatherResponse(taskId, decision.assistantReply, turn + 1, decision.phase);
     }
 
     const reachedTurnLimit = decision.status === "continue";
@@ -929,6 +1138,7 @@ serve(async (req) => {
       knownFacts,
       pendingChecks: decision.pendingChecks,
       closeAttempt: buildCloseAttempt(closingReply, finalStatus, finalSummary),
+      callback: currentRuntime.callback,
       lastError: finalStatus === "completed" ? null : finalEvent,
       events: [...currentRuntime.events, finalEvent].slice(-60),
     };
@@ -944,9 +1154,7 @@ serve(async (req) => {
       },
     });
 
-    return xml(
-      `<?xml version="1.0" encoding="UTF-8"?><Response><Play>${escapeXml(buildVoiceUrl(closingReply, "call", taskId, "close"))}</Play><Hangup/></Response>`,
-    );
+    return buildPlayAndHangupResponse(taskId, closingReply, "close", "call");
   } catch (error) {
     console.error("otto_call_webhook_error", error);
 
