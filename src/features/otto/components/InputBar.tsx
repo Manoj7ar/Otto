@@ -32,6 +32,7 @@ export default function InputBar({
 
   const displayText = isLiveMode ? voiceTranscript : inputText;
   const hasContent = displayText.trim().length > 0;
+  const liveStatusLabel = isLiveMode ? (isListening && !isLivePaused ? "Live" : "Paused") : "Start";
 
   const handleSend = () => {
     const text = isLiveMode ? voiceTranscript : inputText;
@@ -89,15 +90,17 @@ export default function InputBar({
           </motion.button>
 
           <div className="glass flex min-w-0 items-center gap-2 rounded-full px-3 py-2.5 sm:flex-1 sm:gap-3 sm:px-4 sm:py-3">
-            {isLiveMode && (
-              <span
-                className={`rounded-full px-3 py-1 text-[10px] font-medium uppercase tracking-[0.22em] ${
-                  isListening ? "bg-emerald-500/10 text-emerald-950" : "bg-white/16 text-secondary-otto"
-                }`}
-              >
-                {isListening ? "Live" : "Paused"}
-              </span>
-            )}
+            <span
+              className={`rounded-full px-3 py-1 text-[10px] font-medium uppercase tracking-[0.22em] ${
+                isLiveMode
+                  ? isListening && !isLivePaused
+                    ? "bg-emerald-500/10 text-emerald-950"
+                    : "bg-white/16 text-secondary-otto"
+                  : "bg-white/16 text-secondary-otto"
+              }`}
+            >
+              {liveStatusLabel}
+            </span>
             <input
               ref={inputRef}
               type="text"
@@ -110,9 +113,7 @@ export default function InputBar({
               onKeyDown={handleKeyDown}
               placeholder={
                 isLiveMode
-                  ? isLivePaused
-                    ? "Live agent paused while Otto responds..."
-                    : "Listening..."
+                  ? ""
                   : "Type here..."
               }
               disabled={isProcessing && !isLiveMode}

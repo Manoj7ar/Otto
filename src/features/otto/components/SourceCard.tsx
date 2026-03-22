@@ -30,41 +30,36 @@ export default function SourceCard({ source }: SourceCardProps) {
   const siteLabel = source.siteName || source.domain || compactDomain(source.url) || source.sourceType;
 
   return (
-    <a
-      href={source.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="block overflow-hidden rounded-[0.95rem] border border-black/10 bg-white/30 transition-colors hover:bg-white/40 sm:rounded-[1.2rem]"
-    >
-      {source.imageUrl && (
-        <div className="aspect-[16/9] w-full overflow-hidden bg-black/5">
-          <img
-            src={source.imageUrl}
-            alt={source.title}
-            className="h-full w-full object-cover"
-            loading="lazy"
-            referrerPolicy="no-referrer"
-          />
+    <details className="group overflow-hidden rounded-[0.95rem] border border-black/10 bg-white/30 open:bg-white/38 sm:rounded-[1.2rem]">
+      <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-2.5 sm:px-4 sm:py-3">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-secondary-otto">
+            {siteLabel}
+          </p>
+          <p className="mt-1 text-sm font-medium leading-5 text-foreground sm:leading-6">
+            {source.title}
+          </p>
         </div>
-      )}
+        <span className="inline-flex shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/55 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-secondary-otto transition-transform duration-200 group-open:rotate-45">
+          +
+        </span>
+      </summary>
 
-      <div className="px-3 py-2.5 sm:px-4 sm:py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-secondary-otto">
-              {siteLabel}
-            </p>
-            <p className="mt-1 text-sm font-medium leading-5 text-foreground sm:mt-2 sm:leading-6">
-              {source.title}
-            </p>
+      <div className="border-t border-black/10 px-3 py-3 sm:px-4 sm:py-4">
+        {source.imageUrl && (
+          <div className="mb-3 aspect-[16/9] w-full overflow-hidden rounded-[0.85rem] bg-black/5 sm:mb-4 sm:rounded-[1rem]">
+            <img
+              src={source.imageUrl}
+              alt={source.title}
+              className="h-full w-full object-cover"
+              loading="lazy"
+              referrerPolicy="no-referrer"
+            />
           </div>
-          <span className="inline-flex shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/55 p-1.5 text-primary sm:p-2">
-            <ArrowUpRight size={14} />
-          </span>
-        </div>
+        )}
 
         {metaRows.length > 0 && (
-          <div className="mt-2.5 flex flex-wrap gap-1.5 sm:mt-3 sm:gap-2">
+          <div className="flex flex-wrap gap-1.5 sm:gap-2">
             {metaRows.map((item) => (
               <span
                 key={item.key}
@@ -79,11 +74,21 @@ export default function SourceCard({ source }: SourceCardProps) {
         )}
 
         {source.snippet && (
-          <p className="mt-2.5 text-sm leading-5 text-foreground/75 sm:mt-3 sm:leading-6">
+          <p className="mt-3 text-xs leading-5 text-foreground/72 sm:text-sm sm:leading-6">
             {source.snippet}
           </p>
         )}
+
+        <a
+          href={source.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="glass-button mt-3 inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-medium sm:mt-4"
+        >
+          Open source
+          <ArrowUpRight size={13} />
+        </a>
       </div>
-    </a>
+    </details>
   );
 }

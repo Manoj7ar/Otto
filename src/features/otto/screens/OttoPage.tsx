@@ -58,17 +58,19 @@ function formatBubbleTime(timestamp: string) {
 function MessageDisclosure({
   label,
   children,
+  compact = false,
 }: {
   label: string;
   children: React.ReactNode;
+  compact?: boolean;
 }) {
   return (
-    <details className="group mt-3 rounded-[1rem] border border-black/10 bg-white/20 open:bg-white/28 sm:mt-4 sm:rounded-[1.2rem]">
-      <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-secondary-otto sm:px-4 sm:py-3 sm:text-xs sm:tracking-[0.2em]">
+    <details className={`${compact ? "group" : "group mt-3 sm:mt-4"} rounded-[1rem] border border-black/10 bg-white/20 open:bg-white/28 sm:rounded-[1.2rem]`}>
+      <summary className={`flex cursor-pointer list-none items-center justify-between px-3 ${compact ? "py-2 text-[10px]" : "py-2.5 text-[11px] sm:py-3 sm:text-xs"} font-medium uppercase tracking-[0.18em] text-secondary-otto sm:px-4 sm:tracking-[0.2em]`}>
         <span>{label}</span>
         <span className="text-[10px] transition-transform duration-200 group-open:rotate-45">+</span>
       </summary>
-      <div className="border-t border-black/10 px-3 py-3 text-sm text-foreground/85 sm:px-4 sm:py-4">
+      <div className={`border-t border-black/10 px-3 ${compact ? "py-2.5 text-xs" : "py-3 text-sm sm:py-4"} text-foreground/85 sm:px-4`}>
         {children}
       </div>
     </details>
@@ -109,6 +111,23 @@ export default function OttoPage({ profile }: OttoPageProps) {
   const audioUrlRef = useRef<string | null>(null);
   const scrollViewportRef = useRef<HTMLDivElement | null>(null);
   const liveAgentPaused = isProcessing || isSpeaking || cameraEnabled;
+  const speechRecognitionLanguage = useMemo(() => {
+    const normalizedLanguage = profile.language_code.trim().toLowerCase();
+
+    if (normalizedLanguage.includes("-")) {
+      return normalizedLanguage;
+    }
+
+    if (normalizedLanguage === "en") {
+      return profile.timezone.startsWith("Europe/") ? "en-GB" : "en-US";
+    }
+
+    if (normalizedLanguage === "pt") {
+      return "pt-PT";
+    }
+
+    return normalizedLanguage || "en-US";
+  }, [profile.language_code, profile.timezone]);
 
   const {
     isListening,
@@ -117,9 +136,12 @@ export default function OttoPage({ profile }: OttoPageProps) {
     startListening,
     stopListening,
     resetTranscript,
+    submitTranscript,
     isSupported: isSpeechRecognitionSupported,
   } = useSpeechRecognition({
     paused: liveAgentPaused,
+    language: speechRecognitionLanguage,
+    silenceMs: 2600,
     onSilence: (text) => {
       void handleSubmit(text);
     },
@@ -309,9 +331,14 @@ export default function OttoPage({ profile }: OttoPageProps) {
         return;
       }
 
+      if (transcript.trim()) {
+        submitTranscript();
+        return;
+      }
+
       stopListening();
     },
-    [isSpeechRecognitionSupported, resetTranscript, startListening, stopListening, stopSpeaking]
+    [isSpeechRecognitionSupported, resetTranscript, startListening, stopListening, stopSpeaking, submitTranscript, transcript]
   );
 
   const handleReplay = useCallback(() => {
@@ -431,110 +458,126 @@ export default function OttoPage({ profile }: OttoPageProps) {
                           <div className="glass-panel rounded-[1.3rem] rounded-bl-md px-4 py-3 text-sm leading-6 text-foreground sm:mt-2 sm:rounded-[1.8rem] sm:px-5 sm:py-4 sm:leading-7">
                             <p>{turn.content}</p>
 
-                            {(turn.reply.structuredDetails.length > 0 || turn.reply.usedVision || turn.reply.usedWebSearch) && (
-                              <MessageDisclosure label="Context">
-                                <div className="space-y-4">
-                                  <div className="flex flex-wrap gap-2">
-                                    {turn.reply.usedVision && (
-                                      <span className="rounded-full border border-black/10 bg-white/30 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-secondary-otto">
-                                        Vision used
-                                      </span>
-                                    )}
-                                    {turn.reply.usedWebSearch && (
-                                      <span className="rounded-full border border-black/10 bg-white/30 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-secondary-otto">
-                                        Web search used
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  {turn.reply.structuredDetails.length > 0 && turn.reply.subjectType !== "assistant" && (
-                                    <div className="grid gap-3 sm:grid-cols-2">
-                                      {turn.reply.structuredDetails.slice(0, 4).map((detail) => (
-                                        <div key={`${detail.label}-${detail.value}`} className="rounded-[1rem] border border-black/10 bg-white/30 px-3 py-3 sm:rounded-[1.2rem] sm:px-4">
-                                          <p className="text-[11px] uppercase tracking-[0.2em] text-secondary-otto">{detail.label}</p>
-                                          <p className="mt-2 text-sm leading-6 text-foreground/90">{detail.value}</p>
+                            {((turn.reply.structuredDetails.length > 0 || turn.reply.usedVision || turn.reply.usedWebSearch) ||
+                              turn.reply.sources.length > 0 ||
+                              turn.reply.suggestedFollowUps.length > 0 ||
+                              turn.reply.actions.length > 0 ||
+                              (latestReply?.messageId === turn.reply.messageId && canSpeak)) && (
+                              <div className="mt-3 flex flex-wrap gap-2 sm:mt-4">
+                                {(turn.reply.structuredDetails.length > 0 || turn.reply.usedVision || turn.reply.usedWebSearch) && (
+                                  <div className="min-w-[7rem] flex-1 sm:flex-none">
+                                    <MessageDisclosure label="Context" compact>
+                                      <div className="space-y-3">
+                                        <div className="flex flex-wrap gap-2">
+                                          {turn.reply.usedVision && (
+                                            <span className="rounded-full border border-black/10 bg-white/30 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-secondary-otto">
+                                              Vision
+                                            </span>
+                                          )}
+                                          {turn.reply.usedWebSearch && (
+                                            <span className="rounded-full border border-black/10 bg-white/30 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-secondary-otto">
+                                              Web
+                                            </span>
+                                          )}
                                         </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              </MessageDisclosure>
-                            )}
 
-                            {turn.reply.sources.length > 0 && (
-                              <MessageDisclosure label={`Sources (${turn.reply.sources.length})`}>
-                                <div className="space-y-3">
-                                  {turn.reply.sources.map((source) => (
-                                    <SourceCard key={source.url} source={source} />
-                                  ))}
-                                </div>
-                              </MessageDisclosure>
-                            )}
+                                        {turn.reply.structuredDetails.length > 0 && turn.reply.subjectType !== "assistant" && (
+                                          <div className="grid gap-2">
+                                            {turn.reply.structuredDetails.slice(0, 4).map((detail) => (
+                                              <div key={`${detail.label}-${detail.value}`} className="rounded-[0.9rem] border border-black/10 bg-white/30 px-3 py-2.5">
+                                                <p className="text-[10px] uppercase tracking-[0.16em] text-secondary-otto">{detail.label}</p>
+                                                <p className="mt-1.5 text-xs leading-5 text-foreground/88 sm:text-sm">{detail.value}</p>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </MessageDisclosure>
+                                  </div>
+                                )}
 
-                            {turn.reply.suggestedFollowUps.length > 0 && (
-                              <MessageDisclosure label="Follow Ups">
-                                <div className="flex flex-wrap gap-2">
-                                  {turn.reply.suggestedFollowUps.map((item) => (
-                                    <span key={item} className="rounded-full border border-black/10 bg-white/30 px-3 py-2 text-xs text-secondary-otto">
-                                      {item}
-                                    </span>
-                                  ))}
-                                </div>
-                              </MessageDisclosure>
-                            )}
+                                {turn.reply.sources.length > 0 && (
+                                  <div className="min-w-[7rem] flex-1 sm:flex-none">
+                                    <MessageDisclosure label={`Sources (${turn.reply.sources.length})`} compact>
+                                      <div className="space-y-2.5">
+                                        {turn.reply.sources.map((source) => (
+                                          <SourceCard key={source.url} source={source} />
+                                        ))}
+                                      </div>
+                                    </MessageDisclosure>
+                                  </div>
+                                )}
 
-                            {turn.reply.actions.length > 0 && (
-                              <MessageDisclosure label="Actions">
-                                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
-                                  {turn.reply.actions.map((action, index) => {
-                                    const className = index === 0 ? "glass-button-primary" : "glass-button";
+                                {turn.reply.suggestedFollowUps.length > 0 && (
+                                  <div className="min-w-[7rem] flex-1 sm:flex-none">
+                                    <MessageDisclosure label="Follow ups" compact>
+                                      <div className="flex flex-wrap gap-2">
+                                        {turn.reply.suggestedFollowUps.map((item) => (
+                                          <span key={item} className="rounded-full border border-black/10 bg-white/30 px-3 py-1.5 text-[11px] text-secondary-otto">
+                                            {item}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </MessageDisclosure>
+                                  </div>
+                                )}
 
-                                    if (!action.url) {
-                                      return (
-                                        <button
-                                          key={`${action.type}-${action.label}`}
-                                          type="button"
-                                          className={`${className} w-full rounded-full px-5 py-3 text-sm font-medium opacity-60 sm:w-auto`}
-                                          disabled
-                                        >
-                                          {action.label}
-                                        </button>
-                                      );
-                                    }
+                                {turn.reply.actions.length > 0 && (
+                                  <div className="min-w-[7rem] flex-1 sm:flex-none">
+                                    <MessageDisclosure label="Actions" compact>
+                                      <div className="flex flex-col gap-2">
+                                        {turn.reply.actions.map((action, index) => {
+                                          const className = index === 0 ? "glass-button-primary" : "glass-button";
 
-                                    return (
-                                      <a
-                                        key={`${action.type}-${action.label}`}
-                                        href={action.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className={`${className} inline-flex w-full items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-medium sm:w-auto`}
-                                      >
-                                        {action.label}
-                                        <ExternalLink size={14} />
-                                      </a>
-                                    );
-                                  })}
-                                </div>
-                              </MessageDisclosure>
-                            )}
+                                          if (!action.url) {
+                                            return (
+                                              <button
+                                                key={`${action.type}-${action.label}`}
+                                                type="button"
+                                                className={`${className} w-full rounded-full px-4 py-2 text-xs font-medium opacity-60`}
+                                                disabled
+                                              >
+                                                {action.label}
+                                              </button>
+                                            );
+                                          }
 
-                            {latestReply?.messageId === turn.reply.messageId && canSpeak && (
-                              <div className="mt-3 flex flex-col gap-2 sm:mt-4 sm:flex-row sm:flex-wrap">
-                                <button
-                                  type="button"
-                                  onClick={handleReplay}
-                                  className="glass-button w-full rounded-full px-4 py-2 text-xs font-medium sm:w-auto"
-                                >
-                                  {isSpeaking ? "Speaking..." : "Replay voice"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setIsMuted((value) => !value)}
-                                  className="glass-button w-full rounded-full px-4 py-2 text-xs font-medium sm:w-auto"
-                                >
-                                  {isMuted ? "Unmute auto voice" : "Mute auto voice"}
-                                </button>
+                                          return (
+                                            <a
+                                              key={`${action.type}-${action.label}`}
+                                              href={action.url}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className={`${className} inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2 text-xs font-medium`}
+                                            >
+                                              {action.label}
+                                              <ExternalLink size={13} />
+                                            </a>
+                                          );
+                                        })}
+                                      </div>
+                                    </MessageDisclosure>
+                                  </div>
+                                )}
+
+                                {latestReply?.messageId === turn.reply.messageId && canSpeak && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={handleReplay}
+                                      className="glass-button rounded-full px-4 py-2 text-[10px] font-medium uppercase tracking-[0.18em] sm:text-xs"
+                                    >
+                                      {isSpeaking ? "Speaking" : "Reply audio"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setIsMuted((value) => !value)}
+                                      className="glass-button rounded-full px-4 py-2 text-[10px] font-medium uppercase tracking-[0.18em] sm:text-xs"
+                                    >
+                                      {isMuted ? "Auto voice off" : "Auto voice on"}
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>

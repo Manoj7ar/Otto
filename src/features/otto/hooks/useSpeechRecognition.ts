@@ -39,6 +39,7 @@ interface SpeechRecognitionHook {
   startListening: () => void;
   stopListening: () => void;
   resetTranscript: () => void;
+  submitTranscript: () => void;
   isSupported: boolean;
 }
 
@@ -46,6 +47,7 @@ interface UseSpeechRecognitionOptions {
   onSilence?: (transcript: string) => void;
   silenceMs?: number;
   paused?: boolean;
+  language?: string;
 }
 
 function normalizeTranscriptSegment(value: string) {
@@ -85,8 +87,9 @@ function mergeTranscriptSegments(base: string, addition: string) {
 
 export function useSpeechRecognition({
   onSilence,
-  silenceMs = 1600,
+  silenceMs = 2400,
   paused = false,
+  language = "en-US",
 }: UseSpeechRecognitionOptions = {}): SpeechRecognitionHook {
   const [isListening, setIsListening] = useState(false);
   const [isLiveMode, setIsLiveMode] = useState(false);
@@ -159,6 +162,10 @@ export function useSpeechRecognition({
     silenceHandler(nextTranscript);
   }, [clearSilenceTimer, stopRecognitionInstance]);
 
+  const submitTranscript = useCallback(() => {
+    flushTranscript();
+  }, [flushTranscript]);
+
   const beginRecognition = useCallback(() => {
     if (!SpeechRecognition || recognitionRef.current || !liveModeRef.current || pausedRef.current) {
       return;
@@ -167,7 +174,7 @@ export function useSpeechRecognition({
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognition.lang = language;
 
     recognition.onresult = (event: BrowserSpeechRecognitionEvent) => {
       let nextFinalTranscript = "";
@@ -240,7 +247,7 @@ export function useSpeechRecognition({
       recognitionRef.current = null;
       setIsListening(false);
     }
-  }, [SpeechRecognition, clearRestartTimer, clearSilenceTimer, flushTranscript, silenceMs]);
+  }, [SpeechRecognition, clearRestartTimer, clearSilenceTimer, flushTranscript, language, silenceMs]);
 
   const startListening = useCallback(() => {
     if (!SpeechRecognition) {
@@ -284,5 +291,5 @@ export function useSpeechRecognition({
     };
   }, [resetTranscript, stopRecognitionInstance]);
 
-  return { isListening, isLiveMode, transcript, startListening, stopListening, resetTranscript, isSupported };
+  return { isListening, isLiveMode, transcript, startListening, stopListening, resetTranscript, submitTranscript, isSupported };
 }
