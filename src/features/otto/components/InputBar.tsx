@@ -66,19 +66,19 @@ export default function InputBar({
 
   return (
     <motion.div
-      className="fixed bottom-0 left-0 right-0 z-50 px-2.5 pb-3 pt-2.5 sm:px-4 sm:pb-4 sm:pt-4"
+      className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-3 pt-2 sm:px-4 sm:pb-4 sm:pt-4"
       initial={{ y: 80, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ type: "spring", stiffness: 300, damping: 30, delay: 0.3 }}
       style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
     >
-      <div className="glass-strong mx-auto max-w-xl rounded-[1.5rem] px-2.5 py-2.5 sm:rounded-[2rem] sm:px-4 sm:py-4">
-        <div className="grid grid-cols-[3.25rem_minmax(0,1fr)_3.25rem] items-center gap-2 sm:flex sm:gap-3">
+      <div className="glass-strong mx-auto max-w-xl rounded-[1.4rem] px-2.5 py-2 sm:rounded-[2rem] sm:px-4 sm:py-4">
+        <div className="grid grid-cols-[3rem_minmax(0,1fr)_3rem] items-center gap-2 sm:flex sm:gap-3">
           <motion.button
             type="button"
             onClick={onCameraClick}
             disabled={isProcessing}
-            className={`glass-pill flex h-12 w-12 shrink-0 items-center justify-center justify-self-start disabled:opacity-40 sm:h-12 sm:w-12 ${
+            className={`glass-pill flex h-11 w-11 shrink-0 items-center justify-center justify-self-start disabled:opacity-40 sm:h-12 sm:w-12 ${
               isCameraActive ? "border-amber-900/10 bg-amber-100/18" : ""
             }`}
             whileTap={{ scale: 0.92 }}
@@ -117,14 +117,14 @@ export default function InputBar({
               }
               disabled={isProcessing && !isLiveMode}
               readOnly={isLiveMode}
-              className="min-w-0 flex-1 bg-transparent text-left text-sm font-light tracking-[0.01em] text-foreground placeholder:text-left placeholder:text-secondary-otto outline-none disabled:opacity-50"
+              className="min-w-0 flex-1 bg-transparent text-left text-[15px] font-light tracking-[0.01em] text-foreground placeholder:text-left placeholder:text-secondary-otto outline-none disabled:opacity-50 sm:text-sm"
             />
           </div>
 
           {hasContent && !isLiveMode ? (
             <motion.button
               onClick={handleSend}
-              className="glass-button-primary flex h-12 w-12 items-center justify-center rounded-full"
+              className="glass-button-primary flex h-11 w-11 items-center justify-center rounded-full sm:h-12 sm:w-12"
               whileTap={{ scale: 0.92 }}
               whileHover={{ scale: 1.03 }}
               initial={{ scale: 0, opacity: 0 }}
@@ -136,7 +136,7 @@ export default function InputBar({
           ) : (
             <motion.button
               onClick={handleMicClick}
-              className={`flex h-12 w-12 shrink-0 items-center justify-center justify-self-end rounded-full disabled:opacity-40 sm:h-12 sm:w-12 ${
+              className={`flex h-11 w-11 shrink-0 items-center justify-center justify-self-end rounded-full disabled:opacity-40 sm:h-12 sm:w-12 ${
                 !isMicSupported
                   ? "glass-button text-secondary-otto"
                   : isLiveMode

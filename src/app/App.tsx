@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { AnimatePresence } from "framer-motion";
 import type { Session } from "@supabase/supabase-js";
 import { Toaster, toast } from "sonner";
 import AuthScreen from "@/features/auth/components/AuthScreen";
 import AccountPanel from "@/features/account/components/AccountPanel";
+import InstallPrompt from "@/features/install/components/InstallPrompt";
+import { useInstallPrompt } from "@/features/install/useInstallPrompt";
 import {
   toProfileUpsert,
   type ProfileFormValues,
@@ -36,6 +39,7 @@ export default function App() {
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
+  const installPrompt = useInstallPrompt();
 
   const resetInvalidSession = useCallback(async (message = "Your Otto session expired. Sign in again.") => {
     await clearSupabaseBrowserSession();
@@ -390,6 +394,16 @@ export default function App() {
               onSignOut={handleSignOut}
             />
           )}
+
+          <AnimatePresence>
+            {installPrompt.mode && (
+              <InstallPrompt
+                mode={installPrompt.mode}
+                onDismiss={installPrompt.dismiss}
+                onInstall={installPrompt.promptInstall}
+              />
+            )}
+          </AnimatePresence>
         </div>
       )}
     </>

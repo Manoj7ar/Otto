@@ -1,5 +1,14 @@
-const CACHE_NAME = "otto-shell-v1";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/otter.png", "/favicon.ico"];
+const CACHE_NAME = "otto-shell-v2";
+const APP_SHELL = [
+  "/",
+  "/manifest.webmanifest",
+  "/otter.png",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/icon-maskable-512.png",
+  "/apple-touch-icon.png",
+  "/favicon.ico",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

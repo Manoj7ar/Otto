@@ -83,18 +83,13 @@ function ThinkingBubble() {
     <motion.div
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex w-full max-w-[92%] items-end gap-2 sm:max-w-xl sm:gap-3"
+      className="flex w-full justify-start"
     >
-      <img
-        src="/otter.png"
-        alt="Otto"
-        className="h-9 w-9 shrink-0 object-cover sm:h-11 sm:w-11"
-      />
-      <div className="glass-panel rounded-[1.4rem] rounded-bl-md px-4 py-3 sm:rounded-[1.8rem] sm:px-5 sm:py-4">
-        <div className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/75" />
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/55 [animation-delay:160ms]" />
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-black/35 [animation-delay:320ms]" />
+      <div className="glass-panel rounded-full px-4 py-3 sm:px-5 sm:py-4">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-black/75 sm:h-2.5 sm:w-2.5" />
+          <span className="h-2 w-2 animate-pulse rounded-full bg-black/55 [animation-delay:160ms] sm:h-2.5 sm:w-2.5" />
+          <span className="h-2 w-2 animate-pulse rounded-full bg-black/35 [animation-delay:320ms] sm:h-2.5 sm:w-2.5" />
         </div>
       </div>
     </motion.div>
@@ -505,7 +500,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
       </AnimatePresence>
 
       {!cameraEnabled && (
-        <div className="mx-auto flex h-full w-full max-w-5xl flex-1 flex-col overflow-hidden px-3 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 sm:pb-[calc(7rem+env(safe-area-inset-bottom))] sm:pt-6">
+        <div className="mx-auto flex h-full w-full max-w-5xl flex-1 flex-col overflow-hidden px-3 pb-[calc(6.5rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-[calc(7rem+env(safe-area-inset-bottom))] sm:pt-6">
           <div className="mb-3 flex items-center justify-end gap-3 sm:mb-5">
             <div className="flex items-center gap-2">
               <button
@@ -530,7 +525,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <div
               ref={scrollViewportRef}
-              className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-0.5 py-1 sm:space-y-5 sm:px-3 sm:py-3"
+              className="flex-1 space-y-3 overflow-y-auto overscroll-contain px-0.5 py-1 sm:space-y-5 sm:px-3 sm:py-3"
             >
               <AnimatePresence mode="wait">
                 {showGreeting && <WavingOtterGreeting key="greeting" />}
@@ -545,13 +540,13 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                           key={turn.id}
                           initial={{ opacity: 0, y: 18 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className="ml-auto flex w-full max-w-[92%] flex-col items-end gap-1.5 sm:max-w-xl sm:gap-2"
+                          className="ml-auto flex w-full max-w-[88%] flex-col items-end gap-1 sm:max-w-xl sm:gap-2"
                         >
-                          <span className="px-2 text-[10px] uppercase tracking-[0.18em] text-secondary-otto sm:text-[11px] sm:tracking-[0.22em]">You</span>
-                          <div className="glass w-full rounded-[1.45rem] rounded-br-md px-4 py-3 text-sm leading-6 text-foreground sm:rounded-[1.8rem] sm:px-5 sm:py-4 sm:leading-7">
+                          <span className="hidden px-2 text-[10px] uppercase tracking-[0.18em] text-secondary-otto sm:block sm:text-[11px] sm:tracking-[0.22em]">You</span>
+                          <div className="glass w-full rounded-[1.3rem] rounded-br-md px-4 py-3 text-sm leading-6 text-foreground sm:rounded-[1.8rem] sm:px-5 sm:py-4 sm:leading-7">
                             {turn.content}
                           </div>
-                          <span className="px-2 text-[10px] text-secondary-otto sm:text-[11px]">{formatBubbleTime(turn.createdAt)}</span>
+                          <span className="px-1 text-[10px] text-secondary-otto sm:px-2 sm:text-[11px]">{formatBubbleTime(turn.createdAt)}</span>
                         </motion.div>
                       );
                     }
@@ -561,16 +556,11 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                         key={turn.id}
                         initial={{ opacity: 0, y: 18 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="flex w-full max-w-full items-start gap-2 sm:max-w-2xl sm:gap-3"
+                        className="flex w-full max-w-[94%] flex-col items-start sm:max-w-2xl"
                       >
-                        <img
-                          src="/otter.png"
-                          alt="Otter"
-                          className="mt-1 h-9 w-9 shrink-0 object-cover sm:h-11 sm:w-11"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <span className="px-2 text-[10px] uppercase tracking-[0.18em] text-secondary-otto sm:text-[11px] sm:tracking-[0.22em]">Otto</span>
-                          <div className="glass-panel mt-1.5 rounded-[1.45rem] rounded-bl-md px-4 py-3 text-sm leading-6 text-foreground sm:mt-2 sm:rounded-[1.8rem] sm:px-5 sm:py-4 sm:leading-7">
+                        <div className="min-w-0 w-full">
+                          <span className="hidden px-2 text-[10px] uppercase tracking-[0.18em] text-secondary-otto sm:block sm:text-[11px] sm:tracking-[0.22em]">Otto</span>
+                          <div className="glass-panel rounded-[1.3rem] rounded-bl-md px-4 py-3 text-sm leading-6 text-foreground sm:mt-2 sm:rounded-[1.8rem] sm:px-5 sm:py-4 sm:leading-7">
                             <p>{turn.content}</p>
 
                             {(turn.reply.structuredDetails.length > 0 || turn.reply.usedVision || turn.reply.usedWebSearch) && (
@@ -662,7 +652,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                             )}
 
                             {latestReply?.messageId === turn.reply.messageId && canSpeak && (
-                              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                              <div className="mt-3 flex flex-col gap-2 sm:mt-4 sm:flex-row sm:flex-wrap">
                                 <button
                                   type="button"
                                   onClick={handleReplay}
@@ -680,7 +670,7 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                               </div>
                             )}
                           </div>
-                          <span className="mt-1.5 block px-2 text-[10px] text-secondary-otto sm:mt-2 sm:text-[11px]">{formatBubbleTime(turn.createdAt)}</span>
+                          <span className="mt-1 block px-1 text-[10px] text-secondary-otto sm:mt-2 sm:px-2 sm:text-[11px]">{formatBubbleTime(turn.createdAt)}</span>
                         </div>
                       </motion.div>
                     );
@@ -691,13 +681,13 @@ export default function OttoPage({ profile, onOpenTasks, onTaskCreated }: OttoPa
                       <motion.div
                         initial={{ opacity: 0, y: 18 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="ml-auto flex w-full max-w-[92%] flex-col items-end gap-1.5 sm:max-w-xl sm:gap-2"
+                        className="ml-auto flex w-full max-w-[88%] flex-col items-end gap-1 sm:max-w-xl sm:gap-2"
                       >
-                        <span className="px-2 text-[10px] uppercase tracking-[0.18em] text-secondary-otto sm:text-[11px] sm:tracking-[0.22em]">You</span>
-                        <div className="glass w-full rounded-[1.45rem] rounded-br-md px-4 py-3 text-sm leading-6 text-foreground sm:rounded-[1.8rem] sm:px-5 sm:py-4 sm:leading-7">
+                        <span className="hidden px-2 text-[10px] uppercase tracking-[0.18em] text-secondary-otto sm:block sm:text-[11px] sm:tracking-[0.22em]">You</span>
+                        <div className="glass w-full rounded-[1.3rem] rounded-br-md px-4 py-3 text-sm leading-6 text-foreground sm:rounded-[1.8rem] sm:px-5 sm:py-4 sm:leading-7">
                           {pendingUserMessage.content}
                         </div>
-                        <span className="px-2 text-[10px] text-secondary-otto sm:text-[11px]">{formatBubbleTime(pendingUserMessage.createdAt)}</span>
+                        <span className="px-1 text-[10px] text-secondary-otto sm:px-2 sm:text-[11px]">{formatBubbleTime(pendingUserMessage.createdAt)}</span>
                       </motion.div>
 
                       <ThinkingBubble />
